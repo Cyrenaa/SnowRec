@@ -1,3 +1,7 @@
-import Foundation
+import AppKit
 
-print("LauncherApp skeleton")
+// Programmatic entry point: no storyboard, no windows.
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
