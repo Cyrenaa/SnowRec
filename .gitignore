@@ -24,3 +24,8 @@ output_*.mp4
 .radiko_*/
 .live_*/
 *.log
+
+# LauncherApp (SwiftPM)
+LauncherApp/.build/
+LauncherApp/dist/
+*.app
