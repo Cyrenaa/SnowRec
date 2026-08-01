@@ -21,5 +21,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Empty menu for now; populated by later todos.
         item.menu = NSMenu()
         statusItem = item
+
+        // Recover state left over from a previous session: normalize history
+        // statuses and kill orphan process groups (launcher.py 207-233 parity).
+        // StateStore stays the single persistence entry point: load -> mutate
+        // -> save.
+        let store = StateStore()
+        var state = store.load()
+        OrphanRecovery.recover(in: &state)
+        store.save(state)
     }
 }
