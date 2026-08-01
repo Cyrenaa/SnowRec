@@ -22,6 +22,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.menu = NSMenu()
         statusItem = item
 
+        // Prune logs older than 7 days before touching any state
+        // (launcher.py _load_data calls _cleanup_old_logs first).
+        LogCleanup.pruneOldLogs()
+
         // Recover state left over from a previous session: normalize history
         // statuses and kill orphan process groups (launcher.py 207-233 parity).
         // StateStore stays the single persistence entry point: load -> mutate
