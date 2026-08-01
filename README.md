@@ -5,9 +5,10 @@ A collection of CLI tools for recording Japanese TV and radio broadcasts, with s
 ## Prerequisites
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install requests m3u8 pycryptodome playwright
-.venv/bin/playwright install chromium
+brew install uv          # install uv if missing
+uv python install 3.14   # install Python 3.14 if missing
+uv sync                  # creates .venv and installs all deps from pyproject.toml
+.venv/bin/playwright install chromium   # browser binaries for tver_fetch_url
 ```
 
 All commands must be run with `.venv/bin/python`. On macOS, prefix long recordings with `caffeinate -s` to prevent sleep.

@@ -74,9 +74,10 @@ Call chain: `launcher → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_
 ## COMMANDS
 
 ```bash
-# Setup (README doesn't list rumps/pyobjc, needed by launcher)
-python3 -m venv .venv
-.venv/bin/pip install requests m3u8 pycryptodome playwright rumps pyobjc-framework-Cocoa
+# Setup (all 6 deps incl. rumps/pyobjc come from pyproject.toml)
+brew install uv          # install uv if missing
+uv python install 3.14   # install Python 3.14 if missing
+uv sync
 .venv/bin/playwright install chromium   # plus system ffmpeg
 
 # Run
