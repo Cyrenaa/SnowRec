@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 虚拟环境（勿提交）
+.venv/
+
+# opencode 会话状态（勿提交）
+.omo/
+
+# macOS
+.DS_Store
+
+# 录制/下载输出产物
+output_*.mp4
+*.mp4
+*.m4a
+*.srt
+*.vtt
+
+# 临时文件
+.vtt_files/
+.radiko_*/
+.live_*/
+*.log
