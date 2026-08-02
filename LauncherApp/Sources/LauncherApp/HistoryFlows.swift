@@ -42,7 +42,7 @@ enum HistoryFlows {
         // stopping (a stray Escape must never kill a recording).
         alert.buttons[1].keyEquivalent = "\u{1b}"
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
         // launcher.py:626: only stop when the task is still active.
         guard MenuBuilder.activeStatuses.contains(task.status) else { return }
         Swift.Task { @MainActor in
@@ -100,7 +100,7 @@ enum HistoryFlows {
         alert.addButton(withTitle: "关闭")
         alert.buttons[1].keyEquivalent = "\u{1b}"
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
         rerunEntry(delegate: delegate, entry: entry)
     }
 
@@ -147,7 +147,7 @@ enum HistoryFlows {
         confirm.informativeText = "确认清除全部历史记录？"
         confirm.addButton(withTitle: "确认")
         confirm.addButton(withTitle: "取消")
-        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(confirm) == .alertFirstButtonReturn else { return }
         clearHistoryData()
     }
 

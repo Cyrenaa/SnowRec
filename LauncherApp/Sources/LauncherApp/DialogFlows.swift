@@ -33,7 +33,7 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
             outputFormat: { "sub_\($0.lowercased())" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
         let timeStart = trimmed(content.startField.stringValue)
@@ -56,7 +56,7 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "录制时长 (分钟):", secondDefault: "30",
             outputFormat: { "radio_\($0.lowercased()).m4a" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let station = content.popup.titleOfSelectedItem ?? ""
         let startAt = trimmed(content.startField.stringValue)
@@ -69,6 +69,21 @@ enum DialogFlows {
                    startAt: startAt, duration: duration, output: output)
     }
 
+    /// Internal QA hook (`--alert-probe-test`): builds the REAL radio-flow
+    /// alert — the exact same makeTaskAlert construction as newRadio — but
+    /// WITHOUT running the modal, so the probe can verify on-screen
+    /// presentation of a LauncherApp-owned window on the window server.
+    static func radioAlert() -> TaskAlertContent {
+        makeTaskAlert(
+            title: "录制广播",
+            popupLabel: "电台:",
+            options: CommandBuilder.radioStations,
+            defaultOption: "TBS",
+            startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
+            secondLabel: "录制时长 (分钟):", secondDefault: "30",
+            outputFormat: { "radio_\($0.lowercased()).m4a" })
+    }
+
     /// launcher.py:493-520 `_new_recording`.
     static func newTver(delegate: AppDelegate) {
         let content = makeTaskAlert(
@@ -79,7 +94,7 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "录制时长 (分钟):", secondDefault: "60",
             outputFormat: { "\($0.lowercased()).mp4" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
         let startAt = trimmed(content.startField.stringValue)
@@ -229,6 +244,14 @@ enum DialogFlows {
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
         grid.column(at: 1).width = 200
+        // NSAlert sizes its window from the accessory's FRAME (frame-based,
+        // pre-autolayout contract) — an autolayout-only accessory can leave
+        // the window at message+buttons size while the grid overflows it
+        // (observed on a real screen: grid 326pt in a 234pt window = clipped
+        // fields). Pin the frame to the grid's fitting size so the alert
+        // window always fits the fields.
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         alert.accessoryView = grid
 
         let binder = PopupOutputBinder(

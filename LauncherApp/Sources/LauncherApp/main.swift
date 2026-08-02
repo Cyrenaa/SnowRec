@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import Foundation
 
 // --dump-state: print the persisted state as pretty JSON and exit WITHOUT
@@ -743,6 +744,133 @@ func runMenuRefreshTest() {
 if CommandLine.arguments.contains("--menu-refresh-test") {
     runMenuRefreshTest()
     exit(0)
+}
+
+// --alert-probe-test: present the REAL radio-flow alert on a REAL screen and
+// capture binary window-server evidence. The NSAlert accessory layouts were
+// only ever verified through scripted --flow-test paths (which bypass
+// NSAlert entirely), and an accessory app's un-activated runModal can put
+// the alert behind the frontmost app (invisible / non-interactive). The
+// probe launches the FULL app (applicationDidFinishLaunching sets the
+// .accessory policy — mandatory for a correct NSApp.activate), presents
+// DialogFlows.radioAlert() through the FIXED AlertPresenter.presentModal
+// path, and while the modal session is on screen a background Swift.Task
+// captures CGWindowListCopyWindowInfo windows owned by "LauncherApp"
+// (owner + bounds are visible WITHOUT screen-recording TCC — only window
+// NAMES are masked, todo 22 precedent), prints probeBefore/probeDuring,
+// then dismisses via NSApp.abortModal() so runModal returns and the probe
+// prints + exits. Asserts during >= 1 window with width >= 200 and height
+// >= 100 (a sane alert); exit 0 on pass, 1 on failure. Requires
+// SNOWREC_ROOT (dev-mode contract); honor HOME so QA sandboxes work.
+struct AlertWindowSample {
+    let layer: Int
+    let x: Double, y: Double, w: Double, h: Double
+    var line: String {
+        "layer=\(layer) bounds=[\(Int(x)),\(Int(y)),\(Int(w)),\(Int(h))]"
+    }
+}
+
+func captureLauncherWindows() -> [AlertWindowSample] {
+    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID)
+            as? [[String: Any]] else { return [] }
+    var windows: [AlertWindowSample] = []
+    for info in list {
+        guard let owner = info[kCGWindowOwnerName as String] as? String,
+              owner == "LauncherApp" else { continue }
+        let bounds = info[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        windows.append(AlertWindowSample(
+            layer: info[kCGWindowLayer as String] as? Int ?? -1,
+            x: bounds["X"] as? Double ?? 0,
+            y: bounds["Y"] as? Double ?? 0,
+            w: bounds["Width"] as? Double ?? 0,
+            h: bounds["Height"] as? Double ?? 0))
+    }
+    return windows
+}
+
+/// Thread-safe verdict box — written by the detached capture task, read by
+/// the main thread after presentModal returns (happens-after via the
+/// abortModal wake).
+final class ProbeVerdict: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _passed = false
+    func set(_ value: Bool) { lock.lock(); _passed = value; lock.unlock() }
+    var passed: Bool { lock.lock(); defer { lock.unlock() }; return _passed }
+}
+
+/// Runs the probe from applicationDidFinishLaunching (the earliest point
+/// where the .accessory activation policy is set). Exits the process.
+///
+/// The capture + dismissal run on a DETACHED task, not a MainActor task:
+/// while runModal's modal event wait is blocking the main thread (mach-port
+/// wait), the GCD main queue is NOT drained, so a `Swift.Task { @MainActor }`
+/// continuation never resumes (observed: probe hung 60s). The detached task
+/// runs on the global executor, and `NSApp.abortModal()` wakes the modal
+/// event wait from any thread (it signals the modal session, not the main
+/// queue) — routed through the ObjC runtime because the AppKit overlay marks
+/// abortModal as MainActor-isolated. A watchdog hard-exits if the wake ever
+/// fails so QA can never hang.
+@MainActor
+func runAlertProbe() -> Never {
+    let before = captureLauncherWindows()
+    print("probeBefore=\(before.count)")
+    for window in before { print("probeBeforeWindow=\(window.line)") }
+
+    let content = DialogFlows.radioAlert()
+    content.alert.layout()
+    let windowSize = content.alert.window.frame.size
+    print("probeScreen=frame=\(NSScreen.main?.frame ?? .zero) scale=\(NSScreen.main?.backingScaleFactor ?? 0)")
+    print("probeLayout=window=\(Int(windowSize.width))x\(Int(windowSize.height))")
+    if let grid = content.alert.accessoryView {
+        print("probeLayout=grid=\(Int(grid.frame.width))x\(Int(grid.frame.height))")
+        print("probeLayout=gridFitting=\(Int(grid.fittingSize.width))x\(Int(grid.fittingSize.height))")
+    }
+    if let view = content.alert.window.contentView,
+       let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: "/tmp/probe-alert.png"))
+            print("probeLayout=pngWritten=/tmp/probe-alert.png")
+        }
+    }
+    let verdict = ProbeVerdict()
+    let app = NSApplication.shared
+    Swift.Task.detached {
+        try? await Swift.Task.sleep(for: .seconds(3))
+        let during = captureLauncherWindows()
+        print("probeDuring=\(during.count)")
+        for window in during { print("probeDuringWindow=\(window.line)") }
+        verdict.set(during.contains { $0.w >= 200 && $0.h >= 100 })
+        _ = app.perform(NSSelectorFromString("abortModal"))
+        try? await Swift.Task.sleep(for: .seconds(10))
+        print("probeTimeout=abortModal did not wake the modal loop")
+        exit(1)
+    }
+    _ = AlertPresenter.presentModal(content.alert)
+    print(verdict.passed ? "probeAssert=pass" : "probeAssert=fail")
+    print("probeDone=ok")
+    exit(verdict.passed ? 0 : 1)
+}
+
+if CommandLine.arguments.contains("--alert-probe-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--alert-probe-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let app = NSApplication.shared
+    let delegate = AppDelegate()
+    app.delegate = delegate
+    NotificationCenter.default.addObserver(
+        forName: NSApplication.didFinishLaunchingNotification,
+        object: nil, queue: .main
+    ) { _ in
+        Swift.Task { @MainActor in
+            runAlertProbe()
+        }
+    }
+    app.run()
 }
 
 // Programmatic entry point: no storyboard, no windows.

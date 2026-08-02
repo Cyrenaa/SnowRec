@@ -34,9 +34,11 @@ enum PresetFlows {
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
         grid.column(at: 1).width = 200
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         alert.accessoryView = grid
 
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
         guard let type = popup.titleOfSelectedItem else { return }
 
         switch type {
@@ -58,7 +60,7 @@ enum PresetFlows {
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
             outputFormat: { "sub_\($0.lowercased())" },
             nameFormat: { ch, ts in "字幕 \(ch) \(ts)" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
         let timeStart = trimmed(content.startField.stringValue)
@@ -85,7 +87,7 @@ enum PresetFlows {
             secondLabel: "录制时长 (分钟):", secondDefault: "30",
             outputFormat: { "radio_\($0.lowercased()).m4a" },
             nameFormat: { st, sa in "广播 \(st) \(sa)" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let station = content.popup.titleOfSelectedItem ?? ""
         let startAt = trimmed(content.startField.stringValue)
@@ -112,7 +114,7 @@ enum PresetFlows {
             secondLabel: "录制时长 (分钟):", secondDefault: "60",
             outputFormat: { "\($0.lowercased()).mp4" },
             nameFormat: { ch, sa in "\(ch) \(sa)" })
-        guard content.alert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
         let startAt = trimmed(content.startField.stringValue)
@@ -150,7 +152,7 @@ enum PresetFlows {
             let alert = NSAlert()
             alert.messageText = "管理收藏"
             alert.informativeText = "暂无收藏"
-            alert.runModal()
+            AlertPresenter.presentModal(alert)
             return
         }
 
@@ -166,8 +168,10 @@ enum PresetFlows {
         chooseGrid.columnSpacing = 12
         chooseGrid.column(at: 1).xPlacement = .fill
         chooseGrid.column(at: 1).width = 200
+        let chooseFitting = chooseGrid.fittingSize
+        chooseGrid.frame = NSRect(x: 0, y: 0, width: chooseFitting.width, height: chooseFitting.height)
         chooseAlert.accessoryView = chooseGrid
-        guard chooseAlert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(chooseAlert) == .alertFirstButtonReturn else { return }
         guard let chosen = choosePopup.titleOfSelectedItem else { return }
 
         // launcher.py:392-394: choose the action.
@@ -182,8 +186,10 @@ enum PresetFlows {
         actionGrid.columnSpacing = 12
         actionGrid.column(at: 1).xPlacement = .fill
         actionGrid.column(at: 1).width = 200
+        let actionFitting = actionGrid.fittingSize
+        actionGrid.frame = NSRect(x: 0, y: 0, width: actionFitting.width, height: actionFitting.height)
         actionAlert.accessoryView = actionGrid
-        guard actionAlert.runModal() == .alertFirstButtonReturn else { return }
+        guard AlertPresenter.presentModal(actionAlert) == .alertFirstButtonReturn else { return }
         guard let action = actionPopup.titleOfSelectedItem else { return }
 
         if action == "重命名" {
@@ -194,7 +200,7 @@ enum PresetFlows {
             renameAlert.informativeText = "新的收藏名称:"
             let nameField = NSTextField(string: chosen)
             renameAlert.accessoryView = nameField
-            guard renameAlert.runModal() == .alertFirstButtonReturn else { return }
+            guard AlertPresenter.presentModal(renameAlert) == .alertFirstButtonReturn else { return }
             let newName = trimmed(nameField.stringValue)
             guard !newName.isEmpty else { return }
             var updated = store.load()
@@ -210,7 +216,7 @@ enum PresetFlows {
             confirm.informativeText = "确认删除收藏「\(chosen)」？"
             confirm.addButton(withTitle: "确认")
             confirm.addButton(withTitle: "取消")
-            guard confirm.runModal() == .alertFirstButtonReturn else { return }
+            guard AlertPresenter.presentModal(confirm) == .alertFirstButtonReturn else { return }
             var updated = store.load()
             updated.presets.removeAll { $0.name == chosen }
             store.save(updated)
@@ -304,6 +310,8 @@ enum PresetFlows {
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
         grid.column(at: 1).width = 200
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         alert.accessoryView = grid
 
         let binder = PresetSaveBinder(
