@@ -20,6 +20,8 @@ tver_wrapper.py  ──→  tver_fetch_url.py  +  live_recorder_sub.py
 download_vtt.py  ──→  tver_fetch_url.py (--tver-page mode only)
                        ffmpeg (VTT→SRT)
 radiko_recorder.py    (standalone, no internal dependencies)
+LauncherApp/     ──→  tver_wrapper.py / download_vtt.py / radiko_recorder.py
+                      (macOS menu-bar GUI, section 6)
 ```
 
 ---
@@ -173,6 +175,29 @@ Opens a TVer live page in a headless Playwright browser, handles the age-verific
 ```
 
 Normally not called directly; invoked automatically by `tver_wrapper.py` and `download_vtt.py`.
+
+---
+
+## 6. LauncherApp — Menu-Bar Launcher (Swift)
+
+A native macOS menu-bar app (Swift/AppKit: NSStatusItem + NSMenu) that schedules recordings through the scripts above: new subtitle / radio / TVer tasks, presets (收藏), history rerun, stop-all, orphan-process recovery, and completion / failure system notifications. It replaces the old rumps-based Python GUI.
+
+**Requirements**: Xcode Command Line Tools (for `swift build`; install with `xcode-select --install`), plus the Python side from Prerequisites (`uv sync` + `.venv/bin/playwright install chromium`).
+
+```bash
+# Build (from the repo root)
+cd LauncherApp && swift build
+
+# Package into an ad-hoc signed .app (release build → dist/LauncherApp.app)
+cd LauncherApp && ./scripts/package.sh
+
+# Run
+open LauncherApp/dist/LauncherApp.app
+```
+
+The app appears as a ❄️ status item in the menu bar (no Dock icon). State persists to `~/.script_launcher.json` (with `.bak` backup); logs go to `~/.script_logs` (7-day cleanup, 20-entry history cap).
+
+> **Deploy copy**: the deploy copy at `/Users/wyn/Documents/script/` (a separate git repo) is NOT auto-synced. After this repo switches its launcher to the Swift app, sync the deploy copy yourself.
 
 ---
 

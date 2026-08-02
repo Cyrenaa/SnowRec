@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Japanese TV/radio recording and subtitle extraction toolset (macOS). 6 standalone Python CLI scripts flat in the repo root — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright/rumps/pyobjc), external deps ffmpeg, Playwright chromium, caffeinate.
+Japanese TV/radio recording and subtitle extraction toolset (macOS). 5 standalone Python CLI scripts flat in the repo root, plus a native Swift menu-bar launcher — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright), external deps ffmpeg, Playwright chromium, caffeinate, Xcode CLT (for `swift build`).
 
 ## STRUCTURE
 
@@ -11,9 +11,13 @@ script/
 ├── live_recorder_sub.py   # HLS recorder: TS video + VTT subtitles + SCTE35 ad skip (low-level)
 ├── download_vtt.py        # VTT subtitle download/merge/convert to SRT (6 modes)
 ├── radiko_recorder.py     # radiko radio recording (standalone, no internal deps)
-├── launcher.py            # macOS menu-bar GUI (rumps), schedules the scripts above
+├── LauncherApp/           # native macOS menu-bar GUI (Swift/AppKit), schedules the scripts above
+│   ├── Package.swift      # SwiftPM manifest (swift-subprocess 0.5, macOS 13+)
+│   ├── Sources/LauncherApp/  # 16 .swift files (AppDelegate, TaskManager, MenuBuilder, StateStore, ...)
+│   └── scripts/package.sh # assembles dist/LauncherApp.app (ad-hoc signed)
+├── pyproject.toml         # uv project metadata (no build-system); deps locked in uv.lock
 ├── README.md              # the only authoritative doc: all CLI args and usage
-├── .venv/                 # virtualenv (do not touch)
+├── .venv/                 # uv-created virtualenv (do not touch)
 └── .omo/                  # opencode session state (do not touch)
 ```
 
@@ -26,7 +30,7 @@ script/
 | Ad-skip logic | `live_recorder_sub.py`: `AdTracker` (SCTE35 daterange parsing) |
 | radiko auth | `radiko_recorder.py`: `RadikoAuth` (auth1/auth2) |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
-| GUI scheduling / persistence | `launcher.py`: `LauncherApp` (rumps.App) |
+| GUI scheduling / persistence | `LauncherApp/Sources/LauncherApp/AppDelegate.swift` (lifecycle + 5s rebuild) + `TaskManager.swift` (spawn/stop) + `StateStore.swift` (JSON state) |
 
 ## CODE MAP
 
@@ -39,10 +43,19 @@ script/
 | `SubtitleDownloader` | class | live_recorder_sub.py:559 | VTT segment download + time correction + SRT |
 | `RadikoAuth` | class | radiko_recorder.py:49 | auth1/auth2 authentication + encrypted headers |
 | `RadikoRecorder` | class | radiko_recorder.py:134 | AAC segment download + merge |
-| `LauncherApp` | class | launcher.py:179 | rumps.App menu-bar scheduling |
-| `Task` | class | launcher.py:105 | Subprocess management (caffeinate-wrapped) |
+| `AppDelegate` | class | LauncherApp/Sources/LauncherApp/AppDelegate.swift | NSStatusItem app lifecycle + 5s menu rebuild |
+| `TaskManager` | enum | LauncherApp/Sources/LauncherApp/TaskManager.swift | Task spawn + log redirection + termination chain (swift-subprocess) |
+| `MenuBuilder` | enum | LauncherApp/Sources/LauncherApp/MenuBuilder.swift | Status-menu tree (parity with the legacy rumps GUI) |
+| `StateStore` | class | LauncherApp/Sources/LauncherApp/StateStore.swift | Atomic JSON persistence (`~/.script_launcher.json` + `.bak`) |
+| `OrphanRecovery` | enum | LauncherApp/Sources/LauncherApp/OrphanRecovery.swift | Kill orphan process groups + normalize history on launch |
+| `Notifications` | enum | LauncherApp/Sources/LauncherApp/Notifications.swift | Completion/failure banners + permission handling |
+| `CommandBuilder` | enum | LauncherApp/Sources/LauncherApp/CommandBuilder.swift | `caffeinate` command arrays (byte-identical to the legacy Python commands) |
+| `LabelHelpers` | enum | LauncherApp/Sources/LauncherApp/Helpers.swift | safeName / logFileName / endTime / elapsed labels |
+| `DialogFlows` | enum | LauncherApp/Sources/LauncherApp/DialogFlows.swift | New-task dialogs (subtitle / radio / TVer) |
+| `PresetFlows` | enum | LauncherApp/Sources/LauncherApp/PresetFlows.swift | Preset create / rename / delete / run |
+| `HistoryFlows` | enum | LauncherApp/Sources/LauncherApp/HistoryFlows.swift | Task-info + history detail / rerun / clear |
 
-Call chain: `launcher → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_wrapper → tver_fetch_url → live_recorder_sub`; `download_vtt → tver_fetch_url`. Scripts talk via `subprocess.run([sys.executable, ...])` + `--json` stdout protocol.
+Call chain: `LauncherApp → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_wrapper → tver_fetch_url → live_recorder_sub`; `download_vtt → tver_fetch_url`. Scripts talk via `subprocess.run([sys.executable, ...])` + `--json` stdout protocol.
 
 ## CONVENTIONS
 
@@ -61,7 +74,7 @@ Call chain: `launcher → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_
 - **Never run with system python3**: must use `.venv/bin/python` (system python3 lacks deps; README "Python path" note).
 - **Never pass Japanese time directly**: args always take system local time; set `Asia/Tokyo` first (README "Time zone" note).
 - **Never call low-level scripts directly**: `live_recorder_sub.py`, `tver_fetch_url.py` are invoked by upper layers (README "Normally not called directly" notes).
-- **Never overwrite backups with corrupted content**: write `.json.bak` only after JSON parses successfully (launcher.py:189 area).
+- **Never overwrite backups with corrupted content**: write `.json.bak` only after JSON parses successfully (StateStore.load).
 - **No test infrastructure**: do not invent test/lint/build/CI commands; existing `test_` prefixes are local variable names, not tests.
 
 ## UNIQUE STYLES
@@ -69,12 +82,12 @@ Call chain: `launcher → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_
 - Module docstrings embed copy-pasteable `.venv/bin/python xxx.py ...` usage examples.
 - User-visible output and comments are all Chinese (English only in a few docstrings).
 - `# ====` Chinese section banner comments separate code blocks.
-- All launcher subprocess commands wrapped in `caffeinate` to prevent sleep.
+- All LauncherApp subprocess commands wrapped in `caffeinate` to prevent sleep.
 
 ## COMMANDS
 
 ```bash
-# Setup (all 6 deps incl. rumps/pyobjc come from pyproject.toml)
+# Setup (all 5 deps come from pyproject.toml; Swift build needs Xcode CLT)
 brew install uv          # install uv if missing
 uv python install 3.14   # install Python 3.14 if missing
 uv sync
@@ -84,7 +97,9 @@ uv sync
 caffeinate -s .venv/bin/python tver_wrapper.py --tver-page https://tver.jp/live/tbs --start-at 18:00 -d 115 -o out.mp4
 .venv/bin/python download_vtt.py --tver-page https://tver.jp/live/tbs --time-start 20:00 --time-end 21:00
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
-.venv/bin/python launcher.py            # menu-bar GUI daemon
+cd LauncherApp && swift build           # build the menu-bar GUI
+cd LauncherApp && ./scripts/package.sh  # package into dist/LauncherApp.app (ad-hoc signed)
+open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
 
 # No test / lint / build / CI commands
 ```
@@ -92,7 +107,7 @@ caffeinate -s .venv/bin/python tver_wrapper.py --tver-page https://tver.jp/live/
 ## NOTES
 
 - Git repo (remote: `github.com:Cyrenaa/SnowRec.git`); no requirements.txt, deps only recorded in README.
-- `launcher.py` hardcodes `PYTHON = SCRIPT_DIR/.venv/bin/python3` (launcher.py:27), macOS-only (osascript/AppKit), not cross-platform.
+- `LauncherApp` resolves the repo root via `SNOWREC_ROOT` env → `SnowRecRepoRoot` Info.plist → bundle-path walk (`RepoRoot.swift`), then calls `<repoRoot>/.venv/bin/python3` directly (the uv-created venv). macOS-only (AppKit/NSStatusItem), not cross-platform; `swift run`/debug binaries require `SNOWREC_ROOT`.
 - Long recordings must be wrapped in `caffeinate -s` to prevent Mac sleep.
-- launcher persists `~/.script_launcher.json` (with `.bak` backup), logs to `~/.script_logs` (7-day cleanup, 20-entry history cap).
+- LauncherApp persists `~/.script_launcher.json` (with `.bak` backup), logs to `~/.script_logs` (7-day cleanup, 20-entry history cap).
 - Missing ffmpeg must degrade gracefully (catch `FileNotFoundError`, warn, continue) — never hard-fail.
