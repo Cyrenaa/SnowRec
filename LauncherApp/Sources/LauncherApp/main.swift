@@ -78,6 +78,16 @@ if CommandLine.arguments.contains("--dump-builders") {
     exit(0)
 }
 
+// --dump-notifications: print the CURRENT notification authorizationStatus
+// (authorized / denied / notDetermined / provisional) on a labeled line and
+// exit 0 without launching the GUI. External QA asserts on the label (plan
+// M6: macOS caches authorization per bundle id — the PACKAGED binary carries
+// com.snowrec.launcher; the debug binary would report a separate identity).
+if CommandLine.arguments.contains("--dump-notifications") {
+    await Notifications.dumpStatus()
+    exit(0)
+}
+
 // --spawn-test: run the REAL TaskManager spawn path on a fixed python
 // payload (sleep 3s + print 'spawned-ok'), wait for completion, then print
 // JSON {"pid":..., "log":..., "exitCode":...} and exit 0. No GUI.

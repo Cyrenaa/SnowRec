@@ -92,6 +92,11 @@ enum TaskManager {
     /// throws — every failure path ends with status 失败 (launcher.py:149-150).
     @MainActor
     static func start(_ task: Task, store: StateStore) async -> SpawnResult {
+        // Todo 22: the first task creation in this process requests
+        // notification permission (system prompt); the flag guard makes
+        // every later call a no-op, and denial is swallowed.
+        await Notifications.requestAuthorizationIfNeeded()
+
         let startedAt = Date()
         task.startedAt = startedAt
 

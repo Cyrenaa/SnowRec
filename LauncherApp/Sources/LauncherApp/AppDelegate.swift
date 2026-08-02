@@ -28,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) var currentMenu: NSMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Notification delegate installed early (idempotent) so foreground
+        // banners can be presented by todo 23.
+        Notifications.setup()
+
         // Accessory policy keeps the app out of the Dock and app switcher,
         // mirroring the rumps behavior in launcher.py.
         NSApp.setActivationPolicy(.accessory)
