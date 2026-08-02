@@ -14,8 +14,10 @@ import AppKit
 /// `--dump-menu` QA flag without any GUI state.
 enum MenuBuilder {
 
-    /// Statuses that make a task "active" (launcher.py:257).
-    private static let activeStatuses = ["运行中", "等待启动"]
+    /// Statuses that make a task "active" (launcher.py:257). Internal so
+    /// AppDelegate.rebuildMenu() can reuse it for the no-active-tasks clear
+    /// (launcher.py:263-264).
+    static let activeStatuses = ["运行中", "等待启动"]
 
     /// Builds the complete menu tree (launcher.py:255-306).
     static func buildMenu(tasks: [Task], state: StateFile) -> NSMenu {

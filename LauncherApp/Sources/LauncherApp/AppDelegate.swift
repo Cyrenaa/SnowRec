@@ -78,7 +78,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func rebuildMenu() {
         let state = StateStore().load()
         let menu = MenuBuilder.buildMenu(tasks: tasks, state: state)
+        // launcher.py:263-264: when no tasks are active, drop the finished/
+        // stopped leftovers from the in-memory list.
+        if tasks.filter({ MenuBuilder.activeStatuses.contains($0.status) }).isEmpty {
+            tasks = []
+        }
+        // buildMenu() creates fresh DISABLED items every tick, so the action
+        // items must be re-wired here — this is what survives the 5s rebuild.
+        attachMenuActions(to: menu)
         currentMenu = menu
         statusItem?.menu = menu
+    }
+
+    /// Attaches target/action to the three new-task menu items (launcher.py:
+    /// 266-268 callbacks). Called on EVERY rebuild because each rebuild builds
+    /// a brand-new menu object.
+    private func attachMenuActions(to menu: NSMenu) {
+        for item in menu.items {
+            switch item.title {
+            case "📝 下载字幕":
+                item.target = self
+                item.action = #selector(newSubtitleAction)
+                item.isEnabled = true
+            case "📻 录制广播":
+                item.target = self
+                item.action = #selector(newRadioAction)
+                item.isEnabled = true
+            case "📺 录制 TVer":
+                item.target = self
+                item.action = #selector(newTverAction)
+                item.isEnabled = true
+            default:
+                break
+            }
+        }
+    }
+
+    // MARK: - New-task actions (launcher.py:266-268)
+
+    @objc private func newSubtitleAction() {
+        DialogFlows.newSubtitle(delegate: self)
+    }
+
+    @objc private func newRadioAction() {
+        DialogFlows.newRadio(delegate: self)
+    }
+
+    @objc private func newTverAction() {
+        DialogFlows.newTver(delegate: self)
     }
 }

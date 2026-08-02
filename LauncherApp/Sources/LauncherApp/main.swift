@@ -198,6 +198,111 @@ if CommandLine.arguments.contains("--termination-completed-test") {
     exit(0)
 }
 
+// --flow-test <radio|tver|subtitle> [--cancel]: run the FULL post-confirm
+// flow of one dialog with SCRIPTED inputs (no NSAlert), wait for the spawn
+// to register pid+log, hold briefly so QA can pgrep the waiting child, then
+// stop it in-process via TaskManager.stop and print JSON evidence; exit 0.
+// `--cancel` simulates dismissing the alert: nothing is written, nothing is
+// spawned. Requires SNOWREC_ROOT (dev-mode contract) and honors HOME for the
+// sandbox state/log paths.
+struct FlowTestResult: Codable {
+    let flow: String
+    let entry: HistoryEntry?
+    let stopped: Bool
+    let status: String
+}
+
+/// "HH:MM" now + `seconds` (for the radio scripted start, Metis S2: now+2min
+/// keeps the child in 等待启动 instead of rolling 21:00 to the next day).
+func nowHHMM(after seconds: TimeInterval) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "HH:mm"
+    return formatter.string(from: Date().addingTimeInterval(seconds))
+}
+
+/// Polls the persisted entry until the spawn closure recorded a pid
+/// (launcher.py:141-145 parity), or nil on timeout.
+@MainActor
+func waitForPid(_ task: Task, store: StateStore, timeout: TimeInterval) async -> HistoryEntry? {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if let entry = DialogFlows.currentEntry(task, store: store), entry.pid != nil {
+            return entry
+        }
+        try? await Swift.Task.sleep(for: .milliseconds(200))
+    }
+    return DialogFlows.currentEntry(task, store: store)
+}
+
+if CommandLine.arguments.contains("--flow-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--flow-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let args = CommandLine.arguments
+    guard let flagIndex = args.firstIndex(of: "--flow-test"),
+          flagIndex + 1 < args.count,
+          !args[flagIndex + 1].hasPrefix("--") else {
+        FileHandle.standardError.write(
+            Data("--flow-test usage: --flow-test <radio|tver|subtitle> [--cancel]\n".utf8))
+        exit(1)
+    }
+    let flowName = args[flagIndex + 1]
+    let cancel = args.contains("--cancel")
+    let delegate = AppDelegate()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    func json(_ value: FlowTestResult) -> String {
+        (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
+    if cancel {
+        // Scripted cancel: like dismissing the NSAlert (nil inputs) — no
+        // history entry, no spawn, no log file.
+        print(json(FlowTestResult(flow: flowName, entry: nil, stopped: false, status: "cancelled")))
+        exit(0)
+    }
+
+    let task: Task
+    switch flowName {
+    case "radio":
+        task = DialogFlows.startRadio(
+            delegate: delegate, station: "TBS",
+            startAt: nowHHMM(after: 120), duration: "0.1", output: "radio_tbs.m4a")
+    case "tver":
+        task = DialogFlows.startTver(
+            delegate: delegate, channel: "TBS",
+            startAt: "21:00", duration: "30", output: "tbs.mp4")
+    case "subtitle":
+        task = DialogFlows.startSubtitle(
+            delegate: delegate, channel: "CX (富士)",
+            timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)")
+    default:
+        FileHandle.standardError.write(
+            Data("--flow-test: unknown flow '\(flowName)'\n".utf8))
+        exit(1)
+    }
+
+    // Wait for the spawn closure to write pid+log into the persisted entry.
+    // The child keeps running (等待启动 for radio/tver, active download for
+    // subtitle) — QA pgrep's it during the hold window below.
+    _ = await waitForPid(task, store: StateStore(), timeout: 5)
+
+    // Hold window: QA observes the waiting child from another shell before
+    // the in-process stop terminates it (todo 14 chain → 失败, no output
+    // file since the recording never starts).
+    try? await Swift.Task.sleep(for: .seconds(5))
+
+    let stopped = await TaskManager.stop(task, store: StateStore())
+    let entry = DialogFlows.currentEntry(task, store: StateStore())
+    print(json(FlowTestResult(flow: flowName, entry: entry, stopped: stopped, status: task.status)))
+    exit(0)
+}
+
 // --dump-menu: build the menu tree from the persisted state (optionally with
 // --fake-task "<name>" injected tasks, status 运行中, for QA of the active
 // branch) and print it as an indented tree; exit 0, no GUI. The tree is the

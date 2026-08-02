@@ -15,6 +15,13 @@ enum CommandBuilder {
         "EX (朝日)": "https://tver.jp/live/ex",
     ]
 
+    /// CHANNELS key order (launcher.py:61-67 — Python dicts preserve
+    /// insertion order, Swift Dictionary does not; kept explicitly so the
+    /// dialog popups list channels in the same order as launcher.py).
+    static let channelOrder: [String] = [
+        "TBS", "CX (富士)", "TX (东京)", "NTV (日テレ)", "EX (朝日)",
+    ]
+
     /// launcher.py:69 `RADIO_STATIONS`.
     static let radioStations: [String] = [
         "TBS", "QRR", "FMT", "BAYFM78", "LFR", "JORF", "INT",
