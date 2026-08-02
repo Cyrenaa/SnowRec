@@ -78,6 +78,46 @@ if CommandLine.arguments.contains("--dump-builders") {
     exit(0)
 }
 
+// --spawn-test: run the REAL TaskManager spawn path on a fixed python
+// payload (sleep 3s + print 'spawned-ok'), wait for completion, then print
+// JSON {"pid":..., "log":..., "exitCode":...} and exit 0. No GUI.
+// Requires SNOWREC_ROOT (dev-mode contract, same as --dump-builders);
+// HOME is honored through LogCleanup.logDirectory / StateStore, so QA
+// sandboxes work. The state file gets a "spawn-test" history entry with
+// pid + log path written by TaskManager (launcher.py:141-160 parity).
+struct SpawnTestResult: Codable {
+    let pid: Int
+    let log: String?
+    let exitCode: Int32
+}
+if CommandLine.arguments.contains("--spawn-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--spawn-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let store = StateStore()
+    let name = "spawn-test"
+    let cmd = [
+        "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+        "-c", "import time;time.sleep(3);print('spawned-ok')",
+    ]
+    let task = Task(name: name, cmd: cmd)
+    var state = store.load()
+    let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+    state.history.insert(entry, at: 0)  // launcher.py:246 _add_history parity
+    task.historyEntry = entry
+    store.save(state)
+
+    let result = await TaskManager.start(task, store: store)
+
+    let out = SpawnTestResult(pid: result.pid, log: result.logPath, exitCode: result.exitCode)
+    let data = (try? JSONEncoder().encode(out)) ?? Data("{}".utf8)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
 // Programmatic entry point: no storyboard, no windows.
 let app = NSApplication.shared
 let delegate = AppDelegate()
