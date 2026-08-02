@@ -135,6 +135,8 @@ def main():
         cmd.extend(["-o", args.output])
     if args.subtitle:
         cmd.extend(["-s", args.subtitle])
+    if info.get("subtitle_url"):
+        cmd.extend(["--subtitle-url", info["subtitle_url"]])
     if args.concurrency:
         cmd.extend(["-c", str(args.concurrency)])
     if args.poll_interval:

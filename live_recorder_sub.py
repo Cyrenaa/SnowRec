@@ -116,18 +116,25 @@ def select_best_variant(url):
     return best_url, base_path
 
 
-def find_subtitle_variant(base_path, parsed_url):
-    subtitle_url = urlunparse(parsed_url._replace(path=f"{base_path}3.m3u8"))
+def check_subtitle_playlist(url):
+    """Return url if it is a usable subtitle m3u8 playlist (contains .vtt segments), else None."""
     try:
-        resp = requests.get(subtitle_url, headers=HEADERS, timeout=10)
+        resp = requests.get(url, headers=HEADERS, timeout=10)
         if resp.status_code != 200:
             return None
-        playlist = m3u8.loads(resp.text, uri=subtitle_url)
-        if playlist.segments and ".vtt" in playlist.segments[0].uri:
-            return subtitle_url
+        playlist = m3u8.loads(resp.text, uri=url)
+        if playlist.segments and ".vtt" in playlist.segments[0].uri.lower():
+            return url
     except Exception:
         pass
     return None
+
+
+def find_subtitle_variant(base_path, parsed_url):
+    # Convention guess: subtitle track lives next to the video variant as 3.m3u8
+    return check_subtitle_playlist(
+        urlunparse(parsed_url._replace(path=f"{base_path}3.m3u8"))
+    )
 
 
 def find_nearest_time(pdt, pdt_to_time):
@@ -741,6 +748,7 @@ def main():
     parser.add_argument("url", help="m3u8 播放列表地址")
     parser.add_argument("-o", "--output", help="输出视频路径 (默认: output_时间戳.mp4)")
     parser.add_argument("-s", "--subtitle", help="输出字幕路径 (默认: 同视频名.srt)")
+    parser.add_argument("--subtitle-url", help="字幕 m3u8 播放列表地址 (默认: 自动查找)")
     parser.add_argument("-c", "--concurrency", type=int, default=8, help="并发下载数 (默认: 8)")
     parser.add_argument("-p", "--poll-interval", type=float, default=2.0, help="轮询间隔秒数 (默认: 2.0)")
     parser.add_argument("-d", "--duration", type=float, help="录制时长 (分)，到时自动停止")
@@ -787,9 +795,13 @@ def main():
     output_video = args.output or f"output_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
     output_sub = args.subtitle or str(Path(output_video).with_suffix(".srt"))
 
-    # Find subtitle variant
+    # Find subtitle variant (explicit URL wins, fall back to convention guessing)
     sub_url = None
-    if base_path:
+    if args.subtitle_url:
+        sub_url = check_subtitle_playlist(args.subtitle_url)
+        if not sub_url:
+            print(f"[{timestamp()}] 指定字幕 URL 无效，尝试自动查找...")
+    if not sub_url and base_path:
         sub_url = find_subtitle_variant(base_path, parsed)
     if sub_url:
         print(f"[{timestamp()}] 发现字幕轨道: {sub_url.split('/')[-1].split('?')[0]}")
