@@ -224,42 +224,35 @@ enum PresetFlows {
     /// Task(name=preset.name), append to the delegate's tasks, add history,
     /// spawn via a Swift.Task wrapper (TaskManager.start blocks until child
     /// exit, so the menu click must not block). The history label is the
-    /// computed label format (字幕/广播/TVer + time range).
+    /// PRESET NAME — launcher.py:453 `_add_history(p["name"], ...)`. The
+    /// computed label variables at launcher.py:427/437/448 are dead code in
+    /// the preset path (real-world proof: the real state file's "🩷mtmr"
+    /// history entry). New-task flows (DialogFlows) DO use computed labels
+    /// (launcher.py:517/520, 558/561, 586/589) — unchanged here.
     @discardableResult
     static func runPreset(delegate: AppDelegate, preset: Preset) -> Task {
         let root = RepoRoot.resolveRepoRoot() ?? ""
         let cmd: [String]
-        let label: String
         switch preset.action {
         case .subtitle:
-            let channel = preset.channel ?? ""
             cmd = CommandBuilder.subtitleCommand(
-                repoRoot: root, channel: channel,
+                repoRoot: root, channel: preset.channel ?? "",
                 timeStart: preset.timeStart ?? "", timeEnd: preset.timeEnd ?? "",
                 output: preset.output ?? "")
-            label = "字幕 \(channel) \(preset.timeStart ?? "")-\(preset.timeEnd ?? "")"
         case .radio:
-            let station = preset.station ?? ""
             cmd = CommandBuilder.radioCommand(
-                repoRoot: root, station: station,
+                repoRoot: root, station: preset.station ?? "",
                 startAt: preset.startAt ?? "", duration: preset.duration ?? "",
                 output: preset.output ?? "")
-            let end = LabelHelpers.endTimeLabel(
-                startAt: preset.startAt ?? "", durationMin: preset.duration ?? "")
-            label = "广播 \(station) \(preset.startAt ?? "")-\(end)"
         case .tver:
-            let channel = preset.channel ?? ""
             cmd = CommandBuilder.tverCommand(
-                repoRoot: root, channel: channel,
+                repoRoot: root, channel: preset.channel ?? "",
                 startAt: preset.startAt ?? "", duration: preset.duration ?? "",
                 output: preset.output ?? "")
-            let end = LabelHelpers.endTimeLabel(
-                startAt: preset.startAt ?? "", durationMin: preset.duration ?? "")
-            label = "TVer \(channel) \(preset.startAt ?? "")-\(end)"
         }
         let task = Task(name: preset.name, cmd: cmd)
         delegate.tasks.append(task)
-        DialogFlows.addHistory(label: label, cmd: cmd, task: task)
+        DialogFlows.addHistory(label: preset.name, cmd: cmd, task: task)
         Swift.Task { @MainActor in
             _ = await TaskManager.start(task, store: StateStore())
         }
