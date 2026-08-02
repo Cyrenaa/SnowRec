@@ -251,6 +251,21 @@ enum TaskManager {
     /// Persists the given fields into the task's history entry (launcher.py
     /// 141-145 / 158-160 `_save_data` parity). Updates both the in-memory
     /// snapshot and the matching entry in the persisted state.
+    ///
+    /// Entry identity = the LOG PATH — the Swift analog of Python's
+    /// shared-dict identity: it is unique per spawn (timestamp + safeName
+    /// in the filename, launcher.py:121-122). Matching label+cmd alone
+    /// would hit SIBLING entries when history holds two entries with the
+    /// same label+cmd (a rerun creates exactly that), overwriting the
+    /// older one's pid/log/status. Rules (no schema change):
+    /// - pid/log write (logPath passed): the fresh entry still has
+    ///   log == nil until THIS call writes it, so match the head-most
+    ///   nil-log entry (insert order = the just-added entry); entries
+    ///   carrying an older log are never touched.
+    /// - status write (logPath nil): the entry now carries the task's own
+    ///   log — match log == task.logPath (unique per spawn).
+    /// - DEVNULL fallback (logPath and task.logPath both nil): log == nil,
+    ///   head-most only — the same identity-like rule.
     private static func writeState(
         task: Task, store: StateStore,
         pid: Int? = nil, logPath: String? = nil, status: String? = nil
@@ -259,13 +274,21 @@ enum TaskManager {
         if let pid { task.historyEntry?.pid = pid }
         if let logPath { task.historyEntry?.log = logPath }
         if let status { task.historyEntry?.status = status }
+        // logPath != nil → pre-spawn entry (log not written yet);
+        // logPath == nil → post-spawn entry identified by the task's log.
+        let matchLog: String? = logPath != nil ? nil : task.logPath
         var state = store.load()
         var changed = false
         for i in state.history.indices
-        where state.history[i].label == entry.label && state.history[i].cmd == entry.cmd {
+        where state.history[i].label == entry.label
+            && state.history[i].cmd == entry.cmd
+            && state.history[i].log == matchLog {
             if let pid { state.history[i].pid = pid; changed = true }
             if let logPath { state.history[i].log = logPath; changed = true }
             if let status { state.history[i].status = status; changed = true }
+            // nil-log entries are not unique per se (DEVNULL fallback /
+            // pre-spawn state): write only the head-most one.
+            if matchLog == nil { break }
         }
         if changed { store.save(state) }
     }
