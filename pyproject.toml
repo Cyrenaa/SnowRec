@@ -7,6 +7,4 @@ dependencies = [
     "m3u8",
     "pycryptodome>=3.19",
     "playwright",
-    "rumps",
-    "pyobjc-framework-Cocoa>=11",
 ]
