@@ -133,12 +133,15 @@ def fetch_segment_urls(auth: RadikoAuth, medialist_url: str) -> list[str]:
 
 class RadikoRecorder:
     def __init__(self, station_id: str, output_path: str, duration_min: float,
-                 concurrency: int = 4, save_segments: bool = False):
+                 concurrency: int = 4, save_segments: bool = False,
+                 to_video: bool = False, image_dir: str = "../radio/pic"):
         self.station_id = station_id
         self.output_path = Path(output_path)
         self.duration_sec = duration_min * 60
         self.concurrency = concurrency
         self.save_segments = save_segments
+        self.to_video_enabled = to_video
+        self.image_dir = Path(image_dir)
         self.auth = RadikoAuth()
         self.medialist_url = None
         self.seen_urls = set()
@@ -199,6 +202,49 @@ class RadikoRecorder:
             print("[{timestamp()}] 未找到 ffmpeg，跳过合并")
             return False
 
+    def to_video(self) -> bool:
+        if not self.output_path.exists():
+            return False
+
+        # Same-name lookup: name.m4a -> name.jpg/jpeg/png under image_dir
+        image_path = None
+        for ext in (".jpg", ".jpeg", ".png"):
+            cand = self.image_dir / f"{self.output_path.stem}{ext}"
+            if cand.exists():
+                image_path = cand
+                break
+        if not image_path:
+            print(f"[{timestamp()}] 未找到同名图片 "
+                  f"{self.image_dir}/{self.output_path.stem}.jpg，跳过视频转换")
+            return False
+
+        video_path = self.output_path.with_suffix(".mp4")
+        # 5fps loop: static image needs no high fps; ultrafast + crf 28 for speed
+        cmd = [
+            "ffmpeg", "-y",
+            "-loop", "1", "-framerate", "5",
+            "-i", str(image_path),
+            "-i", str(self.output_path),
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-tune", "stillimage",
+            "-pix_fmt", "yuv420p", "-crf", "28",
+            "-r", "5",
+            "-c:a", "copy",
+            "-shortest",
+            str(video_path),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"[{timestamp()}] 视频转换失败: {result.stderr[:200]}")
+                return False
+            size_mb = video_path.stat().st_size / (1024 * 1024)
+            print(f"[{timestamp()}] 视频转换完成: {video_path} ({size_mb:.2f}MB)")
+            return True
+        except FileNotFoundError:
+            print(f"[{timestamp()}] 未找到 ffmpeg，跳过视频转换")
+            return False
+
     def cleanup(self):
         import shutil
         if self.temp_dir.exists() and not self.save_segments:
@@ -247,7 +293,9 @@ class RadikoRecorder:
 
         print(f"[{timestamp()}] 下载 {len(self.downloaded)} 个片段")
         if self.downloaded:
-            self.merge()
+            merged = self.merge()
+            if merged and self.to_video_enabled:
+                self.to_video()
         self.cleanup()
 
 
@@ -264,6 +312,10 @@ def main():
                         help="并发下载数 (默认: 4)")
     parser.add_argument("-s", "--save-segments", action="store_true",
                         help="保留临时分段文件 (用于调试)")
+    parser.add_argument("--to-video", action="store_true",
+                        help="录制完成后转换为图片+音频视频 (需 ffmpeg 和同名图片)")
+    parser.add_argument("--image-dir", default="../radio/pic",
+                        help="同名图片目录 (默认: ../radio/pic，相对当前目录)")
     parser.add_argument("--start-at", metavar="HH:MM",
                         help="延迟到指定时间开始录制 (今日当地时间)")
     args = parser.parse_args()
@@ -299,6 +351,8 @@ def main():
         duration_min=args.duration,
         concurrency=args.concurrency,
         save_segments=args.save_segments,
+        to_video=args.to_video,
+        image_dir=args.image_dir,
     )
 
     running = [True]
