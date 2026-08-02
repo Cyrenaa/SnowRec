@@ -313,6 +313,116 @@ if CommandLine.arguments.contains("--flow-test") {
     exit(0)
 }
 
+// --preset-test <new|rename|delete|run>: scripted preset-management QA with
+// NO dialogs (pattern of --flow-test). Operates on the persisted state:
+//   new    — append the scripted tver preset (TBS / 21:00 / "60" / tbs.mp4 /
+//            name "TBS 21:00") and print presets JSON
+//   rename — rename the LAST preset to "NEW NAME" (missing → no-op, exit 0)
+//   delete — remove the LAST preset (missing → no-op, exit 0)
+//   run    — ensure the scripted preset exists, spawn it through the real
+//            runPreset pipeline (tver wrapper waits with --start-at 21:00),
+//            hold 3s, stop via TaskManager.stop, print history entry +
+//            presets JSON.
+// `run` requires SNOWREC_ROOT (dev-mode contract, like --flow-test); the
+// other modes only touch the state file and honor HOME for sandboxing.
+struct PresetTestResult: Codable {
+    let mode: String
+    let presets: [Preset]
+    let entry: HistoryEntry?
+    let stopped: Bool
+    let status: String
+}
+
+/// The scripted tver preset created by `--preset-test new`/`run`
+/// (spec: TBS, 21:00, "60", tbs.mp4, name "TBS 21:00").
+func scriptedTverPreset() -> Preset {
+    Preset(name: "TBS 21:00", action: .tver, channel: "TBS",
+           station: nil, timeStart: nil, timeEnd: nil,
+           startAt: "21:00", duration: "60", output: "tbs.mp4")
+}
+
+if CommandLine.arguments.contains("--preset-test") {
+    let args = CommandLine.arguments
+    guard let flagIndex = args.firstIndex(of: "--preset-test"),
+          flagIndex + 1 < args.count,
+          !args[flagIndex + 1].hasPrefix("--") else {
+        FileHandle.standardError.write(
+            Data("--preset-test usage: --preset-test <new|rename|delete|run>\n".utf8))
+        exit(1)
+    }
+    let mode = args[flagIndex + 1]
+    let store = StateStore()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    func json(_ value: PresetTestResult) -> String {
+        (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+    func finish(_ result: PresetTestResult) -> Never {
+        print(json(result))
+        exit(0)
+    }
+
+    switch mode {
+    case "new":
+        var state = store.load()
+        state.presets.append(scriptedTverPreset())
+        store.save(state)
+        finish(PresetTestResult(
+            mode: "new", presets: store.load().presets,
+            entry: nil, stopped: false, status: "-"))
+    case "rename":
+        var state = store.load()
+        if let last = state.presets.indices.last {
+            state.presets[last].name = "NEW NAME"
+            store.save(state)
+        }
+        finish(PresetTestResult(
+            mode: "rename", presets: store.load().presets,
+            entry: nil, stopped: false, status: "-"))
+    case "delete":
+        var state = store.load()
+        if let last = state.presets.indices.last {
+            state.presets.remove(at: last)
+            store.save(state)
+        }
+        finish(PresetTestResult(
+            mode: "delete", presets: store.load().presets,
+            entry: nil, stopped: false, status: "-"))
+    case "run":
+        guard ProcessInfo.processInfo.environment["SNOWREC_ROOT"] != nil else {
+            FileHandle.standardError.write(
+                Data("--preset-test run requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+            exit(1)
+        }
+        // "create + run it": ensure the scripted preset exists (no duplicate
+        // when a prior `new` already created it), then run the real pipeline.
+        var state = store.load()
+        if !state.presets.contains(where: { $0.name == "TBS 21:00" }) {
+            state.presets.append(scriptedTverPreset())
+            store.save(state)
+        }
+        guard let preset = store.load().presets.first(where: { $0.name == "TBS 21:00" }) else {
+            FileHandle.standardError.write(
+                Data("--preset-test run: preset not found after ensure\n".utf8))
+            exit(1)
+        }
+        let delegate = AppDelegate()
+        let task = PresetFlows.runPreset(delegate: delegate, preset: preset)
+        _ = await waitForPid(task, store: StateStore(), timeout: 5)
+        // Hold window: QA pgrep's the waiting tver_wrapper child here.
+        try? await Swift.Task.sleep(for: .seconds(3))
+        let stopped = await TaskManager.stop(task, store: StateStore())
+        let entry = DialogFlows.currentEntry(task, store: StateStore())
+        finish(PresetTestResult(
+            mode: "run", presets: store.load().presets,
+            entry: entry, stopped: stopped, status: task.status))
+    default:
+        FileHandle.standardError.write(
+            Data("--preset-test: unknown mode '\(mode)'\n".utf8))
+        exit(1)
+    }
+}
+
 // --dump-menu: build the menu tree from the persisted state (optionally with
 // --fake-task "<name>" injected tasks, status 运行中, for QA of the active
 // branch) and print it as an indented tree; exit 0, no GUI. The tree is the

@@ -89,15 +89,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // buildMenu() creates fresh DISABLED items every tick, so the action
         // items must be re-wired here — this is what survives the 5s rebuild.
-        attachMenuActions(to: menu)
+        attachMenuActions(to: menu, state: state)
         currentMenu = menu
         statusItem?.menu = menu
     }
 
     /// Attaches target/action to the three new-task menu items (launcher.py:
-    /// 266-268 callbacks). Called on EVERY rebuild because each rebuild builds
-    /// a brand-new menu object.
-    private func attachMenuActions(to menu: NSMenu) {
+    /// 266-268 callbacks) and the ⭐ 收藏 submenu items (launcher.py:272-281).
+    /// Called on EVERY rebuild because each rebuild builds a brand-new menu
+    /// object — this is what survives the 5s refresh timer.
+    private func attachMenuActions(to menu: NSMenu, state: StateFile) {
         for item in menu.items {
             switch item.title {
             case "📝 下载字幕":
@@ -112,8 +113,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.target = self
                 item.action = #selector(newTverAction)
                 item.isEnabled = true
+            case "⭐ 收藏":
+                if let submenu = item.submenu {
+                    attachPresetActions(to: submenu, state: state)
+                }
             default:
                 break
+            }
+        }
+    }
+
+    /// Wires the ⭐ 收藏 submenu: preset items → runPreset, ➕ 新建收藏... →
+    /// savePreset, ✏️ 管理收藏... → managePresets (launcher.py:272-281
+    /// callbacks). Preset items carry the Preset as `representedObject`,
+    /// matched against the freshly-loaded state by name (launcher.py:411
+    /// matches the menu title against _DATA at click time).
+    private func attachPresetActions(to submenu: NSMenu, state: StateFile) {
+        for item in submenu.items {
+            switch item.title {
+            case "  ➕ 新建收藏...":
+                item.target = self
+                item.action = #selector(savePresetAction)
+                item.isEnabled = true
+            case "  ✏️ 管理收藏...":
+                item.target = self
+                item.action = #selector(managePresetsAction)
+                item.isEnabled = true
+            default:
+                // Preset item: MenuBuilder prefixes names with two spaces;
+                // a preset renamed away simply stops matching (stays
+                // disabled until the next rebuild).
+                let name = item.title.trimmingCharacters(in: .whitespaces)
+                guard let preset = state.presets.first(where: { $0.name == name }) else {
+                    continue
+                }
+                item.representedObject = preset
+                item.target = self
+                item.action = #selector(runPresetAction(_:))
+                item.isEnabled = true
             }
         }
     }
@@ -130,5 +167,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newTverAction() {
         DialogFlows.newTver(delegate: self)
+    }
+
+    // MARK: - Preset actions (launcher.py:272-281)
+
+    @objc private func savePresetAction() {
+        PresetFlows.savePreset()
+    }
+
+    @objc private func managePresetsAction() {
+        PresetFlows.managePresets()
+    }
+
+    @objc private func runPresetAction(_ sender: NSMenuItem) {
+        guard let preset = sender.representedObject as? Preset else { return }
+        PresetFlows.runPreset(delegate: self, preset: preset)
     }
 }
