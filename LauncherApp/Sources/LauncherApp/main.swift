@@ -36,6 +36,48 @@ if CommandLine.arguments.contains("--dump-helpers") {
     exit(0)
 }
 
+// --dump-builders: build the three preset command arrays on FIXED inputs and
+// print them as JSON on labeled lines, so external QA can compare
+// element-by-element against arrays derived from launcher.py:418-447.
+// Runs BEFORE the GUI; exits 0. Dev-mode contract (D13): requires
+// SNOWREC_ROOT — the debug binary's bundle lives under `.build/` where the
+// 3-level walk cannot resolve the repo root, so an unset env var is an error
+// (exit non-zero, no GUI).
+if CommandLine.arguments.contains("--dump-builders") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--dump-builders requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    func json(_ cmd: [String]) -> String {
+        (try? encoder.encode(cmd)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    }
+    let subtitleCmd = CommandBuilder.subtitleCommand(
+        repoRoot: root, channel: "CX (富士)",
+        timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)")
+    print("subtitle=\(json(subtitleCmd))")
+    let radioCmd = CommandBuilder.radioCommand(
+        repoRoot: root, station: "TBS",
+        startAt: "21:00", duration: "30", output: "radio_tbs.m4a")
+    print("radio=\(json(radioCmd))")
+    let radio60Cmd = CommandBuilder.radioCommand(
+        repoRoot: root, station: "TBS",
+        startAt: "21:00", duration: "60", output: "radio_tbs.m4a")
+    print("radio60=\(json(radio60Cmd))")
+    let tverCmd = CommandBuilder.tverCommand(
+        repoRoot: root, channel: "TBS",
+        startAt: "21:00", duration: "30", output: "tbs.mp4")
+    print("tver=\(json(tverCmd))")
+    let unknownCmd = CommandBuilder.subtitleCommand(
+        repoRoot: root, channel: "NOPE",
+        timeStart: "19:00", timeEnd: "20:00", output: "x.srt")
+    print("unknownChannel=\(json(unknownCmd))")
+    exit(0)
+}
+
 // Programmatic entry point: no storyboard, no windows.
 let app = NSApplication.shared
 let delegate = AppDelegate()

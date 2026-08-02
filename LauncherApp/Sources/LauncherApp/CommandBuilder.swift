@@ -1,0 +1,89 @@
+import Foundation
+
+/// Builds the exact `caffeinate` command arrays launcher.py constructs for
+/// the three action types (launcher.py:418-448). Pure functions: the repo
+/// root is passed in (caller resolves it via `RepoRoot.resolveRepoRoot()`),
+/// which keeps every builder testable without process state.
+enum CommandBuilder {
+
+    /// launcher.py:61-67 `CHANNELS` — TVer live page URLs per channel name.
+    static let channels: [String: String] = [
+        "TBS": "https://tver.jp/live/tbs",
+        "CX (富士)": "https://tver.jp/live/cx",
+        "TX (东京)": "https://tver.jp/live/tx",
+        "NTV (日テレ)": "https://tver.jp/live/ntv",
+        "EX (朝日)": "https://tver.jp/live/ex",
+    ]
+
+    /// launcher.py:69 `RADIO_STATIONS`.
+    static let radioStations: [String] = [
+        "TBS", "QRR", "FMT", "BAYFM78", "LFR", "JORF", "INT",
+    ]
+
+    /// launcher.py:27 `PYTHON = str(SCRIPT_DIR / ".venv" / "bin" / "python3")`.
+    static func pythonPath(repoRoot: String) -> String {
+        "\(repoRoot)/.venv/bin/python3"
+    }
+
+    // MARK: subtitle (launcher.py:418-426)
+
+    /// `page_url = CHANNELS.get(p["channel"], "")` — unknown channels yield an
+    /// EMPTY string element (launcher.py:419).
+    static func subtitleCommand(
+        repoRoot: String,
+        channel: String,
+        timeStart: String,
+        timeEnd: String,
+        output: String
+    ) -> [String] {
+        let pageURL = channels[channel] ?? ""
+        return [
+            "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/download_vtt.py",
+            "--tver-page", pageURL,
+            "--time-start", timeStart,
+            "--time-end", timeEnd,
+            "--output", output,
+        ]
+    }
+
+    // MARK: radio (launcher.py:430-436)
+
+    /// `duration` is passed through as-is (a plain String — never converted
+    /// to a Float and re-formatted, so "30" stays "30", never "30.0").
+    static func radioCommand(
+        repoRoot: String,
+        station: String,
+        startAt: String,
+        duration: String,
+        output: String
+    ) -> [String] {
+        [
+            "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/radiko_recorder.py",
+            station,
+            "--start-at", startAt,
+            "-d", duration,
+            "-o", output,
+        ]
+    }
+
+    // MARK: tver (launcher.py:441-447)
+
+    /// `page_url = CHANNELS.get(p["channel"], "")`; duration passed through
+    /// as-is (same String passthrough as radio).
+    static func tverCommand(
+        repoRoot: String,
+        channel: String,
+        startAt: String,
+        duration: String,
+        output: String
+    ) -> [String] {
+        let pageURL = channels[channel] ?? ""
+        return [
+            "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/tver_wrapper.py",
+            "--tver-page", pageURL,
+            "--start-at", startAt,
+            "-d", duration,
+            "-o", output,
+        ]
+    }
+}
