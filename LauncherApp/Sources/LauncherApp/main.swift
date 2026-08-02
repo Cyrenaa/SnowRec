@@ -533,7 +533,7 @@ if CommandLine.arguments.contains("--history-test") {
         }
         let oldPid = source.pid
         let delegate = AppDelegate()
-        HistoryFlows.rerunEntry(delegate: delegate, entry: source)
+        let rerunTask = HistoryFlows.rerunEntry(delegate: delegate, entry: source)
         // Wait for the rerun's head entry to reach 成功 — the spawn closure
         // writes pid, then the final status (launcher.py:141-160 parity).
         let deadline = Date().addingTimeInterval(10)
@@ -546,6 +546,13 @@ if CommandLine.arguments.contains("--history-test") {
             }
             try? await Swift.Task.sleep(for: .milliseconds(200))
         }
+        // Timeout: the rerun's child is still running (long-running source
+        // cmd, e.g. sleep-60) and rerunEntry spawns it on a detached
+        // Swift.Task — stop it before exiting so the test never leaks a
+        // process. (The first-run path above awaits TaskManager.start
+        // directly, which BLOCKS until the child exits, so no leak is
+        // possible on that early-exit path.)
+        _ = await TaskManager.stop(rerunTask, store: store)
         FileHandle.standardError.write(
             Data("--history-test rerun: timed out waiting for 成功\n".utf8))
         exit(1)
