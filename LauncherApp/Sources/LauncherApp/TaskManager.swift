@@ -48,6 +48,44 @@ enum TaskManager {
         let status: String
     }
 
+    /// Lock-protected bridge between `start`'s spawn closure and `stop`
+    /// (todo 14). The closure registers a teardown action that captures the
+    /// concrete `Execution`; `stop` invokes it from outside the closure.
+    /// swift-subprocess documents the Execution as valid only within the
+    /// closure, but `teardown(using:)` is entirely pid-based (kill(pid,0)
+    /// probe + SIGTERM/SIGKILL to -pid + a DispatchSource on the pid,
+    /// Teardown.swift:268-277 / Subprocess+Unix.swift:103-111) — no stream
+    /// access — so invoking it while the process is still running is safe.
+    /// The handle is cleared by `start` (MainActor) right after the spawn
+    /// returns, so `stop` can never reach a reaped pid.
+    final class TerminationHandle: @unchecked Sendable {
+        private let lock = NSLock()
+        private var action: (@Sendable () async -> Void)?
+
+        func register(_ action: @escaping @Sendable () async -> Void) {
+            lock.lock()
+            self.action = action
+            lock.unlock()
+        }
+
+        /// Runs the registered teardown (SIGTERM to the process group →
+        /// 5s grace → implicit SIGKILL). Returns false when nothing was
+        /// registered yet (spawn is in its first microseconds).
+        func runTeardown() async -> Bool {
+            guard let action = takeAction() else { return false }
+            await action()
+            return true
+        }
+
+        /// NSLock is not usable from async contexts, so the critical section
+        /// lives in this synchronous helper.
+        private func takeAction() -> (@Sendable () async -> Void)? {
+            lock.lock()
+            defer { lock.unlock() }
+            return action
+        }
+    }
+
     /// launcher.py:116-163 `Task.start()`: create the log file (or degrade
     /// to DEVNULL), spawn with the Homebrew-prepended PATH in the repo
     /// root, record pid+log, wait for exit, record the final status. Never
@@ -103,6 +141,12 @@ enum TaskManager {
         )
 
         // Spawn + wait: the closure-based run blocks until the child exits.
+        // The handle bridges the closure's Execution to `stop` (todo 14);
+        // it is cleared right after run returns, so a stopped-by-handle pid
+        // is never teardown'd after being reaped.
+        let handle = TerminationHandle()
+        task.terminationHandle = handle
+
         let termination: TerminationStatus
         do {
             if let logFD {
@@ -110,20 +154,22 @@ enum TaskManager {
                     config,
                     output: .fileDescriptor(logFD, closeAfterSpawningProcess: true),
                     error: .fileDescriptor(logFD, closeAfterSpawningProcess: true),
-                    task: task, store: store, logPath: logPath)
+                    task: task, store: store, logPath: logPath, handle: handle)
             } else {
                 termination = try await runSpawn(
                     config,
                     output: .discarded,
                     error: .discarded,
-                    task: task, store: store, logPath: logPath)
+                    task: task, store: store, logPath: logPath, handle: handle)
             }
         } catch {
             // launcher.py:149-150: exception -> status 失败
+            task.terminationHandle = nil
             task.status = "失败"
             writeState(task: task, store: store, status: "失败")
             return SpawnResult(pid: -1, logPath: logPath, exitCode: -1, status: "失败")
         }
+        task.terminationHandle = nil
 
         // launcher.py:146-148: rc == 0 -> 成功, anything else -> 失败
         let status = termination.isSuccess ? "成功" : "失败"
@@ -137,7 +183,8 @@ enum TaskManager {
     }
 
     /// Spawns `config` and waits for exit. The body closure runs right after
-    /// spawn (before exit) and records pid+log into history — launcher.py:141-145.
+    /// spawn (before exit), records pid+log into history (launcher.py:141-145),
+    /// and registers the teardown action for `stop`.
     @MainActor
     private static func runSpawn<O: OutputProtocol & ErrorOutputProtocol>(
         _ config: Configuration,
@@ -145,7 +192,8 @@ enum TaskManager {
         error: O,
         task: Task,
         store: StateStore,
-        logPath: String?
+        logPath: String?,
+        handle: TerminationHandle
     ) async throws -> TerminationStatus {
         let outcome = try await run(
             config,
@@ -159,9 +207,40 @@ enum TaskManager {
                 task.historyEntry?.log = logPath
             }
             writeState(task: task, store: store, pid: pid, logPath: logPath)
+            // todo 14: SIGTERM to the process group → 5s grace → implicit
+            // SIGKILL to the group. createSession = true (set in `start`)
+            // guarantees pid == pgid, so the launcher itself is never hit.
+            handle.register { @Sendable in
+                await execution.teardown(using: [
+                    .gracefulShutDown(
+                        toProcessGroup: true,
+                        allowedDurationToNextStep: .seconds(5)),
+                ])
+            }
             return pid
         }
         return outcome.terminationStatus
+    }
+
+    /// Terminates a running task: SIGTERM to the process group, 5s grace,
+    /// then implicit SIGKILL (launcher.py:165-172 `Task.kill()` parity —
+    /// launcher.py sends SIGTERM to the process only; the group-wide
+    /// teardown is strictly stronger, per plan D3). Status and the history
+    /// entry flip to 失败 unconditionally (launcher.py:169-172), except when
+    /// the task already finished naturally: the handle is nil then, so this
+    /// is a no-op and the recorded status (成功) is left untouched.
+    /// Never throws — a teardown on an already-dead process errors are
+    /// swallowed inside teardown itself (kill(pid,0) probe, Teardown.swift:205).
+    @MainActor
+    static func stop(_ task: Task, store: StateStore) async -> Bool {
+        guard let handle = task.terminationHandle else {
+            return false  // no running process (launcher.py:166 no-op)
+        }
+        let stopped = await handle.runTeardown()
+        task.terminationHandle = nil
+        task.status = "失败"
+        writeState(task: task, store: store, status: "失败")
+        return stopped
     }
 
     /// Persists the given fields into the task's history entry (launcher.py

@@ -23,6 +23,9 @@ final class Task {
     var logPath: String?
     /// Snapshot of the persisted history entry (launcher.py:112).
     var historyEntry: HistoryEntry?
+    /// Runtime handle for stopping the spawned process (todo 14); nil while
+    /// no process is running (before spawn or after exit). Never persisted.
+    var terminationHandle: TaskManager.TerminationHandle?
 
     init(name: String, cmd: [String]) {
         self.name = name

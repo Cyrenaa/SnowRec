@@ -118,6 +118,86 @@ if CommandLine.arguments.contains("--spawn-test") {
     exit(0)
 }
 
+// --termination-test: spawn a long-running payload (sleep 60), let it run
+// 2 seconds, then stop it through TaskManager.stop (SIGTERM -> 5s -> SIGKILL
+// to the process group) and print {"pid":..., "stopped":true}. QA then
+// asserts pgrep is empty and the sandbox state entry is 失败.
+struct TerminationTestResult: Codable {
+    let pid: Int
+    let stopped: Bool
+    let status: String
+}
+if CommandLine.arguments.contains("--termination-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--termination-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let store = StateStore()
+    let name = "termination-test"
+    let cmd = [
+        "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+        "-c", "import time;time.sleep(60)",
+    ]
+    let task = Task(name: name, cmd: cmd)
+    var state = store.load()
+    let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+    state.history.insert(entry, at: 0)
+    task.historyEntry = entry
+    store.save(state)
+
+    // TaskManager.start blocks until the child exits, so run it concurrently
+    // (Swift.Task — the bare `Task { }` spelling resolves to the local Task
+    // class) while the top level waits 2s and then stops it. Both closures
+    // are MainActor-isolated, so access to `task` is serialized.
+    let started = Swift.Task { @MainActor in
+        await TaskManager.start(task, store: store)
+    }
+    try? await Swift.Task.sleep(for: .seconds(2))
+    let stopped = await TaskManager.stop(task, store: store)
+    _ = await started.value
+
+    let out = TerminationTestResult(
+        pid: task.historyEntry?.pid ?? -1, stopped: stopped, status: task.status)
+    let data = (try? JSONEncoder().encode(out)) ?? Data("{}".utf8)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
+// --termination-completed-test: spawn a payload that finishes naturally
+// (sleep 1, rc=0 -> 成功), then call stop AFTER completion. Must not crash
+// and must leave the status as 成功 (launcher.py: terminate-on-None no-op).
+if CommandLine.arguments.contains("--termination-completed-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--termination-completed-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let store = StateStore()
+    let name = "termination-completed-test"
+    let cmd = [
+        "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+        "-c", "import time;time.sleep(1)",
+    ]
+    let task = Task(name: name, cmd: cmd)
+    var state = store.load()
+    let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+    state.history.insert(entry, at: 0)
+    task.historyEntry = entry
+    store.save(state)
+
+    let result = await TaskManager.start(task, store: store)  // natural completion
+    let stopped = await TaskManager.stop(task, store: store)  // no-op, no crash
+
+    let out = TerminationTestResult(
+        pid: result.pid, stopped: stopped, status: task.status)
+    let data = (try? JSONEncoder().encode(out)) ?? Data("{}".utf8)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
 // Programmatic entry point: no storyboard, no windows.
 let app = NSApplication.shared
 let delegate = AppDelegate()
