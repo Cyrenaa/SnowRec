@@ -198,6 +198,22 @@ if CommandLine.arguments.contains("--termination-completed-test") {
     exit(0)
 }
 
+// --dump-menu: build the menu tree from the persisted state (optionally with
+// --fake-task "<name>" injected tasks, status 运行中, for QA of the active
+// branch) and print it as an indented tree; exit 0, no GUI. The tree is the
+// primary evidence that the menu matches launcher.py:255-306, since
+// screenshots are blocked (no TCC).
+if CommandLine.arguments.contains("--dump-menu") {
+    let args = CommandLine.arguments
+    var fakeTasks: [Task] = []
+    if let i = args.firstIndex(of: "--fake-task"), i + 1 < args.count {
+        fakeTasks.append(Task(name: args[i + 1], cmd: ["fake"]))
+    }
+    let menu = MenuBuilder.buildMenu(tasks: fakeTasks, state: StateStore().load())
+    print(MenuBuilder.dumpTree(menu))
+    exit(0)
+}
+
 // Programmatic entry point: no storyboard, no windows.
 let app = NSApplication.shared
 let delegate = AppDelegate()

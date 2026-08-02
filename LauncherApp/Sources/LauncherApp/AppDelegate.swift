@@ -11,6 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Strong reference so the status item survives for the app's lifetime.
     private var statusItem: NSStatusItem?
 
+    /// Running/scheduled tasks. Empty until todos 18+ populate it; the menu
+    /// only gains the 任务 section and ⏹ 停止全部 once active tasks exist.
+    private var tasks: [Task] = []
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Accessory policy keeps the app out of the Dock and app switcher,
         // mirroring the rumps behavior in launcher.py.
@@ -18,8 +22,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "❄️"
-        // Empty menu for now; populated by later todos.
-        item.menu = NSMenu()
         statusItem = item
 
         // Prune logs older than 7 days before touching any state
@@ -34,5 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var state = store.load()
         OrphanRecovery.recover(in: &state)
         store.save(state)
+
+        // Menu reflects the persisted history/presets at launch; the 任务
+        // section appears once todos 18+ populate `tasks` (todo 17 replaces
+        // this with a 5s rebuild).
+        item.menu = MenuBuilder.buildMenu(tasks: tasks, state: state)
     }
 }
