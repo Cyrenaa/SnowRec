@@ -71,4 +71,56 @@ enum Notifications {
         }
         print("authorizationStatus=\(label)")
     }
+
+    /// Posts the terminal-state banner for a finished task (todo 23).
+    ///
+    /// Called from `TaskManager.start` after the final status (成功/失败) has
+    /// been written. Plan L6 contract:
+    /// - title carries the task name with a 完成/失败 prefix;
+    /// - body carries the status phrase + the log path (DEVNULL-degraded
+    ///   tasks have no log — body is the phrase alone);
+    /// - `authorizationStatus` is checked BEFORE `add` — anything but
+    ///   `.authorized` is SILENT (plan acceptance: denied → no banner, no
+    ///   error, no crash);
+    /// - trigger nil = immediate delivery; identifier UUID per post (unique
+    ///   per task completion);
+    /// - `add` errors are swallowed.
+    static func postCompletion(task: Task) async {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized else { return }
+
+        let success = task.status == "成功"
+        let content = UNMutableNotificationContent()
+        content.title = "\(success ? "完成" : "失败"): \(task.name)"
+        if let logPath = task.logPath {
+            content.body = "\(success ? "录制完成" : "录制失败")\n\(logPath)"
+        } else {
+            content.body = success ? "录制完成" : "录制失败"
+        }
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString, content: content, trigger: nil)
+        _ = try? await center.add(request)
+    }
+
+    /// Prints every DELIVERED notification as
+    /// `delivered=["<identifier>","<title>","<body>"]` (JSON-escaped, one
+    /// line each — newlines in the body can never break the QA assertion
+    /// line). `getDeliveredNotifications` is only callable inside the app
+    /// process; `--dump-notifications` runs in it (dual-review note 1).
+    /// Empty delivered queue → no lines.
+    static func dumpDelivered() async {
+        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+        let encoder = JSONEncoder()
+        for notification in delivered {
+            let parts = [
+                notification.request.identifier,
+                notification.request.content.title,
+                notification.request.content.body,
+            ]
+            let text = (try? encoder.encode(parts))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+            print("delivered=\(text)")
+        }
+    }
 }

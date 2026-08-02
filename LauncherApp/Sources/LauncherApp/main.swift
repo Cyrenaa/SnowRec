@@ -79,12 +79,16 @@ if CommandLine.arguments.contains("--dump-builders") {
 }
 
 // --dump-notifications: print the CURRENT notification authorizationStatus
-// (authorized / denied / notDetermined / provisional) on a labeled line and
-// exit 0 without launching the GUI. External QA asserts on the label (plan
-// M6: macOS caches authorization per bundle id — the PACKAGED binary carries
-// com.snowrec.launcher; the debug binary would report a separate identity).
+// (authorized / denied / notDetermined / provisional) on a labeled line,
+// then every DELIVERED notification as `delivered=["id","title","body"]`
+// (getDeliveredNotifications is only callable inside the app process —
+// dual-review note 1); exit 0 without launching the GUI. External QA asserts
+// on the labels (plan M6: macOS caches authorization per bundle id — the
+// PACKAGED binary carries com.snowrec.launcher; the debug binary would
+// report a separate identity).
 if CommandLine.arguments.contains("--dump-notifications") {
     await Notifications.dumpStatus()
+    await Notifications.dumpDelivered()
     exit(0)
 }
 

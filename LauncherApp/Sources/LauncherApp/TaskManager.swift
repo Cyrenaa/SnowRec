@@ -172,6 +172,9 @@ enum TaskManager {
             task.terminationHandle = nil
             task.status = "失败"
             writeState(task: task, store: store, status: "失败")
+            if task.historyEntry != nil {
+                await Notifications.postCompletion(task: task)
+            }
             return SpawnResult(pid: -1, logPath: logPath, exitCode: -1, status: "失败")
         }
         task.terminationHandle = nil
@@ -180,6 +183,9 @@ enum TaskManager {
         let status = termination.isSuccess ? "成功" : "失败"
         task.status = status
         writeState(task: task, store: store, status: status)
+        if task.historyEntry != nil {
+            await Notifications.postCompletion(task: task)
+        }
         return SpawnResult(
             pid: task.historyEntry?.pid ?? -1,
             logPath: logPath,
