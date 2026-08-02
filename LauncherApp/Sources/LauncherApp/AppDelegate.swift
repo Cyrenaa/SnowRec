@@ -124,6 +124,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let submenu = item.submenu {
                     attachHistoryActions(to: submenu)
                 }
+            case "⏹ 停止全部":
+                // launcher.py:301 callback; only present when active tasks
+                // exist (MenuBuilder is already conditional).
+                item.target = self
+                item.action = #selector(killAllAction)
+                item.isEnabled = true
+            case "退出":
+                // launcher.py:303 callback = rumps.quit_application.
+                item.target = self
+                item.action = #selector(quitAction)
+                item.isEnabled = true
             default:
                 // Task item: the only menu item carrying a Task
                 // representedObject (MenuBuilder attaches the LIVE task).
@@ -235,5 +246,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func clearHistoryAction() {
         HistoryFlows.clearHistory()
+    }
+
+    // MARK: - Stop-all / quit actions (launcher.py:301-303)
+
+    /// launcher.py:632-637 `_kill_all`: run the termination chain on every
+    /// active task (运行中/等待启动), then drop the actually-stopped tasks
+    /// from the list and rebuild the menu. Tasks whose stop was a no-op
+    /// (handle-less, launcher.py:166) keep their status and stay — Python
+    /// only removes tasks whose kill() really ran (已停止). Returns the
+    /// stop results in iteration order for --killall-test QA.
+    @discardableResult
+    func killAll() async -> [Bool] {
+        let active = tasks.filter { MenuBuilder.activeStatuses.contains($0.status) }
+        var results: [Bool] = []
+        var stoppedIDs = Set<ObjectIdentifier>()
+        for task in active {
+            let stopped = await TaskManager.stop(task, store: StateStore())
+            results.append(stopped)
+            if stopped { stoppedIDs.insert(ObjectIdentifier(task)) }
+        }
+        tasks = tasks.filter { !stoppedIDs.contains(ObjectIdentifier($0)) }
+        rebuildMenu()
+        return results
+    }
+
+    /// Menu-bar entry to `killAll()` (launcher.py:301 callback). The
+    /// termination chain is async, so the click spawns a background task —
+    /// same pattern as HistoryFlows.taskInfo's 停止 button.
+    @objc private func killAllAction() {
+        Swift.Task { @MainActor in
+            _ = await killAll()
+        }
+    }
+
+    /// 退出 = NSApp.terminate (launcher.py:303 rumps.quit_application).
+    /// Child processes are NOT touched — they become orphans and are
+    /// recovered on the next launch (OrphanRecovery, todo 10).
+    @objc private func quitAction() {
+        NSApp.terminate(nil)
     }
 }

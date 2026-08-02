@@ -596,6 +596,100 @@ if CommandLine.arguments.contains("--history-test") {
     }
 }
 
+// --killall-test: spawn TWO sleep-60 tasks through the REAL TaskManager
+// spawn path, wait for both pids, then call AppDelegate.killAll() — the
+// exact ⏹ 停止全部 pipeline (launcher.py:632-637) — and print
+// {"stopped":[true,true],"activeRemaining":0}. QA then asserts both
+// sleep-60 processes are dead (pgrep empty) and both sandbox state entries
+// are 失败. Requires SNOWREC_ROOT (dev-mode contract, like --flow-test).
+struct KillAllTestResult: Codable {
+    let stopped: [Bool]
+    let activeRemaining: Int
+}
+
+if CommandLine.arguments.contains("--killall-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--killall-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let store = StateStore()
+    let delegate = AppDelegate()
+    let cmd = [
+        "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+        "-c", "import time;time.sleep(60)",
+    ]
+    // Two identical sleep-60 tasks through the real pipeline. Each start is
+    // awaited on a detached Swift.Task — start blocks until the child exits,
+    // which only happens via the killAll teardown below.
+    for i in 0..<2 {
+        let name = "killall-test-\(i)"
+        let task = Task(name: name, cmd: cmd)
+        var state = store.load()
+        let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+        state.history.insert(entry, at: 0)
+        task.historyEntry = entry
+        store.save(state)
+        delegate.tasks.append(task)
+        _ = Swift.Task { @MainActor in
+            await TaskManager.start(task, store: store)
+        }
+    }
+    // Wait for both spawn closures to register pids (QA pgrep window).
+    for task in delegate.tasks {
+        _ = await waitForPid(task, store: store, timeout: 5)
+    }
+    try? await Swift.Task.sleep(for: .seconds(2))
+    let stopped = await delegate.killAll()
+    let out = KillAllTestResult(stopped: stopped, activeRemaining: delegate.tasks.count)
+    let data = (try? JSONEncoder().encode(out)) ?? Data("{}".utf8)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
+// --quit-test: simulate the 退出 quit path. A normal app exit
+// (NSApp.terminate / rumps.quit_application, launcher.py:303) does NOT kill
+// child processes — so this flag spawns one sleep-60 task, waits for its
+// pid, prints evidence, and exits(0) WITHOUT stopping it. The child is left
+// orphaned, exactly like a real quit; QA verifies it survives (pgrep), then
+// relaunches the app so OrphanRecovery (todo 10) kills the leftover process
+// group and marks the entry 失败 — the full orphan-recovery cycle.
+struct QuitTestResult: Codable {
+    let pid: Int
+    let childSurvives: Bool
+}
+
+if CommandLine.arguments.contains("--quit-test") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--quit-test requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let store = StateStore()
+    let name = "quit-test"
+    let cmd = [
+        "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+        "-c", "import time;time.sleep(60)",
+    ]
+    let task = Task(name: name, cmd: cmd)
+    var state = store.load()
+    let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+    state.history.insert(entry, at: 0)
+    task.historyEntry = entry
+    store.save(state)
+    _ = Swift.Task { @MainActor in
+        await TaskManager.start(task, store: store)
+    }
+    _ = await waitForPid(task, store: store, timeout: 5)
+    // The quit: exit WITHOUT stopping the child (NSApp.terminate semantics).
+    let out = QuitTestResult(pid: task.historyEntry?.pid ?? -1, childSurvives: true)
+    let data = (try? JSONEncoder().encode(out)) ?? Data("{}".utf8)
+    print(String(data: data, encoding: .utf8) ?? "{}")
+    exit(0)
+}
+
 // --dump-menu: build the menu tree from the persisted state (optionally with
 // --fake-task "<name>" injected tasks, status 运行中, for QA of the active
 // branch) and print it as an indented tree; exit 0, no GUI. The tree is the
