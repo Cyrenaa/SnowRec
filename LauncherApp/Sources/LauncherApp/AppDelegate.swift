@@ -13,7 +13,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Running/scheduled tasks. Empty until todos 18+ populate it; the menu
     /// only gains the 任务 section and ⏹ 停止全部 once active tasks exist.
-    private var tasks: [Task] = []
+    /// Internal (not private) so the --menu-refresh-test QA flag can inject
+    /// tasks without a GUI.
+    var tasks: [Task] = []
+
+    /// 5-second full-menu-rebuild timer (launcher.py:184-185 parity: created
+    /// at init and started immediately). Held strongly so it is never
+    /// deallocated; the target/selector style avoids the @Sendable closure
+    /// isolation issue of the block-based API under Swift 6.
+    private var refreshTimer: Timer?
+
+    /// The menu most recently built by `rebuildMenu()`, kept regardless of
+    /// whether a status item exists (QA flags read it without a GUI).
+    private(set) var currentMenu: NSMenu?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Accessory policy keeps the app out of the Dock and app switcher,
@@ -37,9 +49,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         OrphanRecovery.recover(in: &state)
         store.save(state)
 
-        // Menu reflects the persisted history/presets at launch; the 任务
-        // section appears once todos 18+ populate `tasks` (todo 17 replaces
-        // this with a 5s rebuild).
-        item.menu = MenuBuilder.buildMenu(tasks: tasks, state: state)
+        // Initial menu build, then the 5s full-rebuild timer starts
+        // (launcher.py:184-185: timer created in __init__, started
+        // immediately; each tick is a full rebuild).
+        rebuildMenu()
+        startRefreshTimer()
+    }
+
+    /// Starts the repeating 5-second refresh timer on the main run loop.
+    /// The run loop must be running for it to fire: NSApp.run() keeps it
+    /// alive in the real app, RunLoop.main.run(until:) in QA flags.
+    func startRefreshTimer() {
+        refreshTimer = Timer.scheduledTimer(
+            timeInterval: 5, target: self, selector: #selector(refreshTick),
+            userInfo: nil, repeats: true)
+    }
+
+    @objc private func refreshTick() {
+        rebuildMenu()
+    }
+
+    /// Full menu rebuild (launcher.py:252-253 _tick -> _rebuild_menu).
+    /// Reloads persisted state every tick so externally-written history/
+    /// preset changes appear (launcher.py _tick reads _DATA which is mutated
+    /// in place; Swift reloads from disk, equivalent observable), then
+    /// replaces the menu object — the NSMenu equivalent of rumps
+    /// clear+update (launcher.py:305-306).
+    func rebuildMenu() {
+        let state = StateStore().load()
+        let menu = MenuBuilder.buildMenu(tasks: tasks, state: state)
+        currentMenu = menu
+        statusItem?.menu = menu
     }
 }

@@ -214,6 +214,41 @@ if CommandLine.arguments.contains("--dump-menu") {
     exit(0)
 }
 
+// --menu-refresh-test: exercise the REAL 5s refresh timer end-to-end with
+// no GUI (no NSApplication, no status item). Phase A injects a 运行中 task
+// into the app's task list and pumps the main run loop ~6s so the timer
+// fires once; the dump must contain the task item. Phase B flips the status
+// to 成功, pumps another ~6s; the task item AND the "── 任务 ──" header must
+// be gone (launcher.py:257 active filter) — proving the periodic rebuild,
+// not a one-shot. Prints both dumps labeled, exit 0.
+//
+// Top-level code is an async context (SE-0343), where RunLoop.run(until:)
+// is `noasync` — so the test lives in a plain @MainActor sync function.
+@MainActor
+func runMenuRefreshTest() {
+    let delegate = AppDelegate()
+    delegate.startRefreshTimer()
+
+    // Phase A: task appears after the first 5s tick.
+    let task = Task(name: "test", cmd: ["fake"])
+    delegate.tasks = [task]  // Task init status = 运行中
+    RunLoop.main.run(until: Date().addingTimeInterval(6))
+    let dumpA = MenuBuilder.dumpTree(delegate.currentMenu ?? NSMenu())
+    print("--- Phase A (after 5s tick, task 运行中) ---")
+    print(dumpA)
+
+    // Phase B: task completes -> filtered out on the next tick.
+    task.status = "成功"
+    RunLoop.main.run(until: Date().addingTimeInterval(6))
+    let dumpB = MenuBuilder.dumpTree(delegate.currentMenu ?? NSMenu())
+    print("--- Phase B (after next 5s tick, task 成功) ---")
+    print(dumpB)
+}
+if CommandLine.arguments.contains("--menu-refresh-test") {
+    runMenuRefreshTest()
+    exit(0)
+}
+
 // Programmatic entry point: no storyboard, no windows.
 let app = NSApplication.shared
 let delegate = AppDelegate()
