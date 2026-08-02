@@ -25,10 +25,14 @@ enum MenuBuilder {
         let active = tasks.filter { activeStatuses.contains($0.status) }
 
         // ── 任务 ── header + one item per active task (launcher.py:258-262).
+        // Each item carries its LIVE Task as representedObject so
+        // AppDelegate can wire taskInfo without title parsing (todo 20).
         if !active.isEmpty {
             menu.addItem(disabledItem("── 任务 ──"))
             for task in active {
-                menu.addItem(disabledItem(task.menuTitle))
+                let item = disabledItem(task.menuTitle)
+                item.representedObject = task
+                menu.addItem(item)
             }
             menu.addItem(.separator())
         }
@@ -50,10 +54,14 @@ enum MenuBuilder {
 
         // 🕐 最近 — parent item with submenu (launcher.py:284-297).
         // Status tag ONLY when the status is non-empty (launcher.py:287).
+        // Each entry item carries its HistoryEntry as representedObject
+        // (todo 20: never parse the display title — it has the tag).
         let historyMenu = NSMenu()
         for entry in state.history {
             let statusTag = entry.status.isEmpty ? "" : " [\(entry.status)]"
-            historyMenu.addItem(disabledItem("  \(entry.label)\(statusTag)"))
+            let item = disabledItem("  \(entry.label)\(statusTag)")
+            item.representedObject = entry
+            historyMenu.addItem(item)
         }
         if historyMenu.items.isEmpty {
             historyMenu.addItem(disabledItem("  (空)"))

@@ -95,9 +95,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Attaches target/action to the three new-task menu items (launcher.py:
-    /// 266-268 callbacks) and the ⭐ 收藏 submenu items (launcher.py:272-281).
-    /// Called on EVERY rebuild because each rebuild builds a brand-new menu
-    /// object — this is what survives the 5s refresh timer.
+    /// 266-268 callbacks), the ⭐ 收藏 submenu items (launcher.py:272-281),
+    /// the 🕐 最近 submenu items (launcher.py:284-297) and the task items
+    /// (launcher.py:261 callback). Called on EVERY rebuild because each
+    /// rebuild builds a brand-new menu object — this is what survives the
+    /// 5s refresh timer. Task/history/preset items are identified by their
+    /// `representedObject` (attached by MenuBuilder), never by title.
     private func attachMenuActions(to menu: NSMenu, state: StateFile) {
         for item in menu.items {
             switch item.title {
@@ -117,8 +120,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let submenu = item.submenu {
                     attachPresetActions(to: submenu, state: state)
                 }
+            case "🕐 最近":
+                if let submenu = item.submenu {
+                    attachHistoryActions(to: submenu)
+                }
             default:
-                break
+                // Task item: the only menu item carrying a Task
+                // representedObject (MenuBuilder attaches the LIVE task).
+                if let task = item.representedObject as? Task {
+                    item.target = self
+                    item.action = #selector(taskInfoAction(_:))
+                    item.isEnabled = true
+                }
             }
         }
     }
@@ -155,6 +168,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Wires the 🕐 最近 submenu: history entries → rerunHistory (the entry
+    /// comes from representedObject — its title carries a " [status]" tag
+    /// that must NOT be parsed, launcher.py:458 strips it in Python),
+    /// ❌ 清除全部 → clearHistory (launcher.py:292 callback).
+    private func attachHistoryActions(to submenu: NSMenu) {
+        for item in submenu.items {
+            switch item.title {
+            case "  ❌ 清除全部":
+                item.target = self
+                item.action = #selector(clearHistoryAction)
+                item.isEnabled = true
+            default:
+                // History entry item: carries its HistoryEntry snapshot.
+                // "(空)" carries none and stays disabled.
+                guard let entry = item.representedObject as? HistoryEntry else {
+                    continue
+                }
+                item.target = self
+                item.action = #selector(rerunHistoryAction(_:))
+                item.isEnabled = true
+            }
+        }
+    }
+
     // MARK: - New-task actions (launcher.py:266-268)
 
     @objc private func newSubtitleAction() {
@@ -182,5 +219,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func runPresetAction(_ sender: NSMenuItem) {
         guard let preset = sender.representedObject as? Preset else { return }
         PresetFlows.runPreset(delegate: self, preset: preset)
+    }
+
+    // MARK: - Task-info / history actions (launcher.py:261 / 284-297)
+
+    @objc private func taskInfoAction(_ sender: NSMenuItem) {
+        guard let task = sender.representedObject as? Task else { return }
+        HistoryFlows.taskInfo(delegate: self, task: task)
+    }
+
+    @objc private func rerunHistoryAction(_ sender: NSMenuItem) {
+        guard let entry = sender.representedObject as? HistoryEntry else { return }
+        HistoryFlows.rerunHistory(delegate: self, entry: entry)
+    }
+
+    @objc private func clearHistoryAction() {
+        HistoryFlows.clearHistory()
     }
 }

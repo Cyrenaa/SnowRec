@@ -423,6 +423,172 @@ if CommandLine.arguments.contains("--preset-test") {
     }
 }
 
+// --history-test <info|rerun|clear|stop-running>: scripted QA for the
+// task-info / history-detail / clear-history flows (todo 20) with NO
+// dialogs (pattern of --preset-test / --flow-test):
+//   info         — print the task-info alert CONTENT lines for a fake
+//                  running task (raw, unasserted — QA compares against
+//                  launcher.py:608-613) plus a never-started variant (已运行: -)
+//   rerun        — fresh sandbox: spawn a sleep-3 task via the real
+//                  TaskManager path, wait for 成功; then rerun history[0]
+//                  through the REAL rerunEntry pipeline and wait for the
+//                  new head entry to reach 成功; print source + new head +
+//                  oldPid (new entry must carry a NEW pid)
+//   clear        — clear the history (post-确认 pipeline) and print the
+//                  empty list
+//   stop-running — spawn a sleep-60 task, run the REAL taskInfo stop path
+//                  (HistoryFlows.stopTaskAndCleanup, no alert), print
+//                  pid/stopped/status + remaining task count
+// `rerun`/`stop-running` require SNOWREC_ROOT (they spawn, like
+// --flow-test); `info`/`clear` only touch formatting/state and honor HOME.
+struct HistoryTestResult: Codable {
+    let mode: String
+    let source: HistoryEntry?
+    let head: HistoryEntry?
+    let oldPid: Int?
+    let history: [HistoryEntry]
+    let pid: Int?
+    let stopped: Bool
+    let status: String
+    let activeRemaining: Int
+}
+
+if CommandLine.arguments.contains("--history-test") {
+    let args = CommandLine.arguments
+    guard let flagIndex = args.firstIndex(of: "--history-test"),
+          flagIndex + 1 < args.count,
+          !args[flagIndex + 1].hasPrefix("--") else {
+        FileHandle.standardError.write(
+            Data("--history-test usage: --history-test <info|rerun|clear|stop-running>\n".utf8))
+        exit(1)
+    }
+    let mode = args[flagIndex + 1]
+    let store = StateStore()
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    func json(_ value: HistoryTestResult) -> String {
+        (try? encoder.encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+    func finish(_ result: HistoryTestResult) -> Never {
+        print(json(result))
+        exit(0)
+    }
+
+    switch mode {
+    case "info":
+        // launcher.py:608-613 content lines: startedAt -3661s →
+        // "1小时1分1秒" (elapsedLabel parity), logPath shown verbatim.
+        let running = Task(
+            name: "info-test",
+            cmd: ["caffeinate", "/usr/bin/python3", "-c", "print('x')"])
+        running.startedAt = Date().addingTimeInterval(-3661)
+        running.logPath = "/tmp/snowrec-qa-home/.script_logs/info-test.log"
+        print("--- running task (elapsed 1小时1分1秒) ---")
+        print(HistoryFlows.infoText(for: running))
+        // launcher.py:606: no startedAt → "已运行: -"
+        let neverStarted = Task(name: "info-test-2", cmd: ["caffeinate", "x"])
+        print("--- never-started task (已运行: -) ---")
+        print(HistoryFlows.infoText(for: neverStarted))
+        exit(0)
+    case "clear":
+        HistoryFlows.clearHistoryData()
+        finish(HistoryTestResult(
+            mode: "clear", source: nil, head: nil, oldPid: nil,
+            history: store.load().history, pid: nil, stopped: false,
+            status: "-", activeRemaining: 0))
+    case "rerun":
+        guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+              !root.isEmpty else {
+            FileHandle.standardError.write(
+                Data("--history-test rerun requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+            exit(1)
+        }
+        // Fresh sandbox (empty history): script the first run — a sleep-3
+        // task through the REAL TaskManager path, waiting for 成功. With
+        // existing history (e.g. a seeded deploy-path entry for QA
+        // failure), history[0] IS the rerun source and nothing is spawned.
+        if store.load().history.isEmpty {
+            let name = "history-test"
+            let cmd = [
+                "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+                "-c", "import time;time.sleep(3)",
+            ]
+            let task = Task(name: name, cmd: cmd)
+            var state = store.load()
+            let entry = HistoryEntry(label: name, cmd: cmd, status: "运行", pid: nil, log: nil)
+            state.history.insert(entry, at: 0)
+            task.historyEntry = entry
+            store.save(state)
+            let result = await TaskManager.start(task, store: store)
+            if result.status != "成功" {
+                FileHandle.standardError.write(
+                    Data("--history-test rerun: first run failed (\(result.status))\n".utf8))
+                exit(1)
+            }
+        }
+        guard let source = store.load().history.first else {
+            FileHandle.standardError.write(
+                Data("--history-test rerun: no source entry\n".utf8))
+            exit(1)
+        }
+        let oldPid = source.pid
+        let delegate = AppDelegate()
+        HistoryFlows.rerunEntry(delegate: delegate, entry: source)
+        // Wait for the rerun's head entry to reach 成功 — the spawn closure
+        // writes pid, then the final status (launcher.py:141-160 parity).
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline {
+            if let head = store.load().history.first, head.status == "成功" {
+                finish(HistoryTestResult(
+                    mode: "rerun", source: source, head: head, oldPid: oldPid,
+                    history: store.load().history, pid: nil, stopped: false,
+                    status: head.status, activeRemaining: 0))
+            }
+            try? await Swift.Task.sleep(for: .milliseconds(200))
+        }
+        FileHandle.standardError.write(
+            Data("--history-test rerun: timed out waiting for 成功\n".utf8))
+        exit(1)
+    case "stop-running":
+        guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+              !root.isEmpty else {
+            FileHandle.standardError.write(
+                Data("--history-test stop-running requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+            exit(1)
+        }
+        let name = "history-stop-test"
+        let cmd = [
+            "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+            "-c", "import time;time.sleep(60)",
+        ]
+        let task = Task(name: name, cmd: cmd)
+        var state = store.load()
+        let entry = HistoryEntry(label: name, cmd: cmd, status: "运行", pid: nil, log: nil)
+        state.history.insert(entry, at: 0)
+        task.historyEntry = entry
+        store.save(state)
+        let delegate = AppDelegate()
+        delegate.tasks = [task]
+        let spawned = Swift.Task { @MainActor in
+            await TaskManager.start(task, store: store)
+        }
+        _ = await waitForPid(task, store: store, timeout: 5)
+        // Hold window: QA pgrep's the sleeping child here.
+        try? await Swift.Task.sleep(for: .seconds(2))
+        let stopped = await HistoryFlows.stopTaskAndCleanup(delegate: delegate, task: task)
+        _ = await spawned.value
+        finish(HistoryTestResult(
+            mode: "stop-running", source: nil, head: nil, oldPid: nil,
+            history: store.load().history, pid: task.historyEntry?.pid,
+            stopped: stopped, status: task.status,
+            activeRemaining: delegate.tasks.count))
+    default:
+        FileHandle.standardError.write(
+            Data("--history-test: unknown mode '\(mode)'\n".utf8))
+        exit(1)
+    }
+}
+
 // --dump-menu: build the menu tree from the persisted state (optionally with
 // --fake-task "<name>" injected tasks, status 运行中, for QA of the active
 // branch) and print it as an indented tree; exit 0, no GUI. The tree is the
