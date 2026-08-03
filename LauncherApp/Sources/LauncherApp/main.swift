@@ -37,9 +37,9 @@ if CommandLine.arguments.contains("--dump-helpers") {
     exit(0)
 }
 
-// --dump-builders: build the three preset command arrays on FIXED inputs and
-// print them as JSON on labeled lines, so external QA can compare
-// element-by-element against arrays derived from launcher.py:418-447.
+// --dump-builders: build the preset command arrays (subtitle/radio/tver) on
+// FIXED inputs and print them as JSON on labeled lines, so external QA can
+// compare element-by-element against arrays derived from launcher.py:418-447.
 // Runs BEFORE the GUI; exits 0. Dev-mode contract (D13): requires
 // SNOWREC_ROOT — the debug binary's bundle lives under `.build/` where the
 // 3-level walk cannot resolve the repo root, so an unset env var is an error
@@ -64,6 +64,10 @@ if CommandLine.arguments.contains("--dump-builders") {
         repoRoot: root, station: "TBS",
         startAt: "21:00", duration: "30", output: "radio_tbs.m4a")
     print("radio=\(json(radioCmd))")
+    let radioToVideoCmd = CommandBuilder.radioCommand(
+        repoRoot: root, station: "TBS",
+        startAt: "21:00", duration: "30", output: "radio_tbs.m4a", toVideo: true)
+    print("radioToVideo=\(json(radioToVideoCmd))")
     let radio60Cmd = CommandBuilder.radioCommand(
         repoRoot: root, station: "TBS",
         startAt: "21:00", duration: "60", output: "radio_tbs.m4a")
@@ -76,6 +80,18 @@ if CommandLine.arguments.contains("--dump-builders") {
         repoRoot: root, channel: "NOPE",
         timeStart: "19:00", timeEnd: "20:00", output: "x.srt")
     print("unknownChannel=\(json(unknownCmd))")
+    exit(0)
+}
+
+// --dump-restart: print the restart decision from
+// RestartSupport.restartDecision() as labeled lines — mode "bundle" when
+// Bundle.main.bundlePath ends with ".app", else "reexec" — and exit 0
+// without launching the GUI. QA of the T7+T8 restart decision: the
+// packaged binary reports bundle, the debug binary reports reexec.
+if CommandLine.arguments.contains("--dump-restart") {
+    let decision = RestartSupport.restartDecision()
+    print("restartMode=\(decision.mode)")
+    print("restartPath=\(decision.path)")
     exit(0)
 }
 
@@ -318,11 +334,18 @@ if CommandLine.arguments.contains("--flow-test") {
     exit(0)
 }
 
-// --preset-test <new|rename|delete|run>: scripted preset-management QA with
-// NO dialogs (pattern of --flow-test). Operates on the persisted state:
+// --preset-test <new|rename|modify|delete|run>: scripted preset-management
+// QA with NO dialogs (pattern of --flow-test). Operates on the persisted
+// state:
 //   new    — append the scripted tver preset (TBS / 21:00 / "60" / tbs.mp4 /
 //            name "TBS 21:00") and print presets JSON
 //   rename — rename the LAST preset to "NEW NAME" (missing → no-op, exit 0)
+//   modify — ensure the scripted preset exists (create it when missing),
+//            overwrite its fields in place (duration "45", output "tbs2.mp4"
+//            — QA of edit-style persistence; toVideo stays nil since the
+//            scripted preset is tver) and, if a radio preset named
+//            "RADIO TV" exists, set toVideo=true (QA of to_video
+//            round-trip); print presets JSON
 //   delete — remove the LAST preset (missing → no-op, exit 0)
 //   run    — ensure the scripted preset exists, spawn it through the real
 //            runPreset pipeline (tver wrapper waits with --start-at 21:00),
@@ -352,7 +375,7 @@ if CommandLine.arguments.contains("--preset-test") {
           flagIndex + 1 < args.count,
           !args[flagIndex + 1].hasPrefix("--") else {
         FileHandle.standardError.write(
-            Data("--preset-test usage: --preset-test <new|rename|delete|run>\n".utf8))
+            Data("--preset-test usage: --preset-test <new|rename|modify|delete|run>\n".utf8))
         exit(1)
     }
     let mode = args[flagIndex + 1]
@@ -392,6 +415,31 @@ if CommandLine.arguments.contains("--preset-test") {
         }
         finish(PresetTestResult(
             mode: "delete", presets: store.load().presets,
+            entry: nil, stopped: false, status: "-"))
+    case "modify":
+        // In-place overwrite of the preset named "TBS 21:00" (QA of
+        // edit-style persistence without the PresetFlows dialog). Ensures
+        // the scripted tver preset exists when missing, then overwrites
+        // duration/output. The scripted preset is tver, so toVideo stays
+        // nil; if QA seeded a radio preset named "RADIO TV", toVideo is
+        // flipped to true to exercise to_video persistence.
+        var state = store.load()
+        if let idx = state.presets.firstIndex(where: { $0.name == "TBS 21:00" }) {
+            state.presets[idx].duration = "45"
+            state.presets[idx].output = "tbs2.mp4"
+        } else {
+            state.presets.append(scriptedTverPreset())
+            if let idx = state.presets.firstIndex(where: { $0.name == "TBS 21:00" }) {
+                state.presets[idx].duration = "45"
+                state.presets[idx].output = "tbs2.mp4"
+            }
+        }
+        if let radioIdx = state.presets.firstIndex(where: { $0.name == "RADIO TV" }) {
+            state.presets[radioIdx].toVideo = true
+        }
+        store.save(state)
+        finish(PresetTestResult(
+            mode: "modify", presets: store.load().presets,
             entry: nil, stopped: false, status: "-"))
     case "run":
         guard ProcessInfo.processInfo.environment["SNOWREC_ROOT"] != nil else {
