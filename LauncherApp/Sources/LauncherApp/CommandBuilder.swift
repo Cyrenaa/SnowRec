@@ -57,20 +57,27 @@ enum CommandBuilder {
 
     /// `duration` is passed through as-is (a plain String — never converted
     /// to a Float and re-formatted, so "30" stays "30", never "30.0").
+    /// `toVideo` appends `"--to-video"` after the `-o <output>` pair
+    /// (launcher.py parity: `if p.get("to_video"): cmd.append("--to-video")`).
     static func radioCommand(
         repoRoot: String,
         station: String,
         startAt: String,
         duration: String,
-        output: String
+        output: String,
+        toVideo: Bool = false
     ) -> [String] {
-        [
+        var cmd = [
             "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/radiko_recorder.py",
             station,
             "--start-at", startAt,
             "-d", duration,
             "-o", output,
         ]
+        if toVideo {
+            cmd.append("--to-video")
+        }
+        return cmd
     }
 
     // MARK: tver (launcher.py:441-447)
