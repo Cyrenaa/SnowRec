@@ -825,6 +825,8 @@ func runAlertProbe() -> Never {
         print("probeLayout=grid=\(Int(grid.frame.width))x\(Int(grid.frame.height))")
         print("probeLayout=gridFitting=\(Int(grid.fittingSize.width))x\(Int(grid.fittingSize.height))")
     }
+    let buttons = content.alert.buttons
+    print("probeButtons=\(buttons.map(\.title))")
     if let view = content.alert.window.contentView,
        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -835,12 +837,15 @@ func runAlertProbe() -> Never {
     }
     let verdict = ProbeVerdict()
     let app = NSApplication.shared
+    let buttonTitles = buttons.map(\.title)
     Swift.Task.detached {
         try? await Swift.Task.sleep(for: .seconds(3))
         let during = captureLauncherWindows()
         print("probeDuring=\(during.count)")
         for window in during { print("probeDuringWindow=\(window.line)") }
-        verdict.set(during.contains { $0.w >= 200 && $0.h >= 100 })
+        let windowOk = during.contains { $0.w >= 200 && $0.h >= 100 }
+        let buttonsOk = buttonTitles.count >= 2 && buttonTitles[0] == "确认"
+        verdict.set(windowOk && buttonsOk)
         _ = app.perform(NSSelectorFromString("abortModal"))
         try? await Swift.Task.sleep(for: .seconds(10))
         print("probeTimeout=abortModal did not wake the modal loop")
