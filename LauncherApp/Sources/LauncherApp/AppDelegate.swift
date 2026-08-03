@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "❄️"
+        item.button?.title = "⛄️"
         statusItem = item
 
         // Prune logs older than 7 days before touching any state
