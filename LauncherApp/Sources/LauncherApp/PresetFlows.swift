@@ -25,6 +25,9 @@ enum PresetFlows {
         let alert = NSAlert()
         alert.messageText = "新建收藏"
         alert.informativeText = "选择类型:"
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
 
         let popup = NSPopUpButton()
         popup.addItems(withTitles: ["下载字幕", "录制广播", "录制 TVer"])
@@ -160,6 +163,9 @@ enum PresetFlows {
         let chooseAlert = NSAlert()
         chooseAlert.messageText = "管理收藏"
         chooseAlert.informativeText = "选择要管理的收藏:"
+        chooseAlert.addButton(withTitle: "确认")
+        chooseAlert.addButton(withTitle: "取消")
+        chooseAlert.buttons[1].keyEquivalent = "\u{1b}"
         let choosePopup = NSPopUpButton()
         choosePopup.addItems(withTitles: state.presets.map(\.name))
         choosePopup.selectItem(at: 0)
@@ -178,6 +184,9 @@ enum PresetFlows {
         let actionAlert = NSAlert()
         actionAlert.messageText = "管理收藏"
         actionAlert.informativeText = "对「\(chosen)」执行:"
+        actionAlert.addButton(withTitle: "确认")
+        actionAlert.addButton(withTitle: "取消")
+        actionAlert.buttons[1].keyEquivalent = "\u{1b}"
         let actionPopup = NSPopUpButton()
         actionPopup.addItems(withTitles: ["重命名", "删除"])
         actionPopup.selectItem(at: 0)
@@ -198,6 +207,9 @@ enum PresetFlows {
             let renameAlert = NSAlert()
             renameAlert.messageText = "管理收藏"
             renameAlert.informativeText = "新的收藏名称:"
+            renameAlert.addButton(withTitle: "确认")
+            renameAlert.addButton(withTitle: "取消")
+            renameAlert.buttons[1].keyEquivalent = "\u{1b}"
             let nameField = NSTextField(string: chosen)
             renameAlert.accessoryView = nameField
             guard AlertPresenter.presentModal(renameAlert) == .alertFirstButtonReturn else { return }
@@ -286,6 +298,9 @@ enum PresetFlows {
         let alert = NSAlert()
         alert.messageText = title
         alert.alertStyle = .informational
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
 
         let popup = NSPopUpButton()
         popup.addItems(withTitles: options)
