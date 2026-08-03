@@ -4,8 +4,9 @@ import AppKit
 /// shared confirm-path pipeline reused by the `--flow-test` QA flag.
 ///
 /// osascript → AppKit mapping (plan E4):
-/// - `osa_choose`  → NSPopUpButton inside the alert's accessory NSGridView
-/// - `osa_dialog`  → NSTextField (same grid)
+/// - `osa_form` `("select", ...)`   → NSPopUpButton inside the alert's accessory NSGridView
+/// - `osa_form` `("text", ...)`     → NSTextField (same grid)
+/// - `osa_form` `("checkbox", ...)` → NSButton checkbox (radio 转换为视频)
 /// - `osa_confirm` → the alert's 确认/取消 buttons
 ///
 /// Cancel semantics: osa_* return None on cancel and the flow returns with NO
@@ -32,7 +33,7 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
-            outputFormat: { "sub_\($0.lowercased())" })
+            outputInitial: "sub_tbs")
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -55,7 +56,8 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "录制时长 (分钟):", secondDefault: "30",
-            outputFormat: { "radio_\($0.lowercased()).m4a" })
+            outputInitial: "radio_tbs.m4a",
+            checkboxLabel: "转换为视频", checkboxDefault: false)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let station = content.popup.titleOfSelectedItem ?? ""
@@ -66,16 +68,7 @@ enum DialogFlows {
             return
         }
 
-        // launcher.py: `to_video = osa_confirm("转换为视频", ...)` — second
-        // 确认/取消 alert after the field dialog confirms.
-        let toVideoAlert = NSAlert()
-        toVideoAlert.messageText = "转换为视频"
-        toVideoAlert.informativeText = "录制完成后是否转换为视频 (需同名图片)？"
-        toVideoAlert.alertStyle = .informational
-        toVideoAlert.addButton(withTitle: "确认")
-        toVideoAlert.addButton(withTitle: "取消")
-        toVideoAlert.buttons[1].keyEquivalent = "\u{1b}"
-        let toVideo = AlertPresenter.presentModal(toVideoAlert) == .alertFirstButtonReturn
+        let toVideo = content.checkbox?.state == .on
 
         startRadio(delegate: delegate, station: station,
                    startAt: startAt, duration: duration, output: output,
@@ -94,7 +87,8 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "录制时长 (分钟):", secondDefault: "30",
-            outputFormat: { "radio_\($0.lowercased()).m4a" })
+            outputInitial: "radio_tbs.m4a",
+            checkboxLabel: "转换为视频", checkboxDefault: false)
     }
 
     /// launcher.py:493-520 `_new_recording`.
@@ -106,7 +100,7 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "录制时长 (分钟):", secondDefault: "60",
-            outputFormat: { "\($0.lowercased()).mp4" })
+            outputInitial: "tbs.mp4")
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -221,10 +215,11 @@ enum DialogFlows {
     // MARK: - Alert construction
 
     /// Builds one flow's NSAlert: messageText = flow title, accessory view =
-    /// NSGridView stacking [popup, 开始时间, second field, 输出文件名]. The
-    /// output field's default follows the popup selection (launcher.py derives
-    /// the output default from the chosen channel/station) but only while the
-    /// user hasn't typed their own value.
+    /// NSGridView stacking [popup, 开始时间, second field, 输出文件名], plus
+    /// an optional checkbox row (radio 转换为视频). The output default is a
+    /// STATIC per-flow string (launcher.py: the osa_form output field ships a
+    /// fixed `f"sub_{...}"`-style default, no longer derived from the chosen
+    /// channel/station).
     private static func makeTaskAlert(
         title: String,
         popupLabel: String,
@@ -232,7 +227,8 @@ enum DialogFlows {
         defaultOption: String,
         startLabel: String, startDefault: String,
         secondLabel: String, secondDefault: String,
-        outputFormat: @escaping (String) -> String
+        outputInitial: String,
+        checkboxLabel: String? = nil, checkboxDefault: Bool = false
     ) -> TaskAlertContent {
         let alert = NSAlert()
         alert.messageText = title
@@ -250,14 +246,23 @@ enum DialogFlows {
 
         let startField = NSTextField(string: startDefault)
         let secondField = NSTextField(string: secondDefault)
-        let outputField = NSTextField(string: outputFormat(defaultOption))
+        let outputField = NSTextField(string: outputInitial)
 
-        let grid = NSGridView(views: [
+        var rows: [[NSView]] = [
             [label(popupLabel), popup],
             [label(startLabel), startField],
             [label(secondLabel), secondField],
             [label("输出文件名:"), outputField],
-        ])
+        ]
+        var checkbox: NSButton?
+        if let checkboxLabel {
+            let box = NSButton(checkboxWithTitle: checkboxLabel, target: nil, action: nil)
+            box.state = checkboxDefault ? .on : .off
+            checkbox = box
+            rows.append([label(""), box])
+        }
+
+        let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
@@ -272,12 +277,10 @@ enum DialogFlows {
         grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         alert.accessoryView = grid
 
-        let binder = PopupOutputBinder(
-            format: outputFormat, popup: popup, outputField: outputField)
         return TaskAlertContent(
             alert: alert, popup: popup,
             startField: startField, secondField: secondField,
-            outputField: outputField, binder: binder)
+            outputField: outputField, checkbox: checkbox)
     }
 
     /// Grid cell label: right-aligned, non-editable.
@@ -291,63 +294,28 @@ enum DialogFlows {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Holds a flow alert's controls. `binder` is retained here for the whole
-    /// modal session so the popup action keeps firing — target/action holds no
-    /// strong reference to its target.
+    /// Holds a flow alert's controls. `checkbox` is nil for flows without an
+    /// optional checkbox row (subtitle/tver); the radio flow reads
+    /// `checkbox?.state == .on` for 转换为视频.
     final class TaskAlertContent {
         let alert: NSAlert
         let popup: NSPopUpButton
         let startField: NSTextField
         let secondField: NSTextField
         let outputField: NSTextField
-        let binder: PopupOutputBinder
+        let checkbox: NSButton?
 
         init(
             alert: NSAlert, popup: NSPopUpButton,
             startField: NSTextField, secondField: NSTextField,
-            outputField: NSTextField, binder: PopupOutputBinder
+            outputField: NSTextField, checkbox: NSButton?
         ) {
             self.alert = alert
             self.popup = popup
             self.startField = startField
             self.secondField = secondField
             self.outputField = outputField
-            self.binder = binder
-        }
-    }
-
-    /// Bridges the NSPopUpButton action to the output-field default
-    /// (launcher.py: the output default is `f"sub_{ch.lower()}"`-style of the
-    /// SELECTED channel/station, picked in an earlier osascript step).
-    final class PopupOutputBinder: NSObject {
-        private let format: (String) -> String
-        private weak var outputField: NSTextField?
-        private var lastAuto: String
-
-        init(
-            format: @escaping (String) -> String,
-            popup: NSPopUpButton, outputField: NSTextField
-        ) {
-            self.format = format
-            self.outputField = outputField
-            self.lastAuto = format(popup.titleOfSelectedItem ?? "")
-            super.init()
-            popup.target = self
-            popup.action = #selector(popupChanged(_:))
-        }
-
-        // @objc methods are nonisolated by default; MainActor is declared
-        // explicitly so the AppKit control access below compiles cleanly.
-        @MainActor @objc private func popupChanged(_ sender: NSPopUpButton) {
-            let next = format(sender.titleOfSelectedItem ?? "")
-            guard let field = outputField else { return }
-            // Refresh the auto-default only while the user hasn't typed their
-            // own value (launcher.py computes the default per dialog, so a
-            // user-edited value survives a channel change).
-            if field.stringValue.isEmpty || field.stringValue == lastAuto {
-                field.stringValue = next
-            }
-            lastAuto = next
+            self.checkbox = checkbox
         }
     }
 }
