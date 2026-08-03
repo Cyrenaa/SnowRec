@@ -71,7 +71,7 @@ enum PresetFlows {
 
         switch type {
         case "下载字幕": subtitlePresetFlow(title: title, target: target)
-        case "录制广播": radioPresetFlow(title: title, target: target)
+        case "录制广播": radioPresetFlow(target: target)
         default: tverPresetFlow(title: title, target: target)
         }
     }
@@ -111,28 +111,15 @@ enum PresetFlows {
     }
 
     /// launcher.py:336-357: station + 开始时间 + 时长 + output + name, plus
-    /// the "录制完成后转换为视频？" confirm (launcher.py:352-354 — BEFORE the
-    /// name dialog; in the single-alert form it is asked after the field
-    /// alert, before commit). Unlike the other dialogs, 取消 does NOT bail
-    /// the flow: osa_confirm returns False and the preset is still saved
-    /// (launcher.py:352, no `if not to_video: return`). A false answer is
-    /// stored as nil so `to_video` is omitted from JSON (default → key
-    /// omitted); a true answer is stored as true.
-    private static func radioPresetFlow(title: String, target: Preset?) {
-        let station = dv(target?.station, fallback: "TBS")
-        let startAt = dv(target?.startAt, fallback: "21:00")
-        let duration = dv(target?.duration, fallback: "30")
-        let content = makePresetAlert(
-            title: "\(title) — 广播",
-            popupLabel: "电台:",
-            options: CommandBuilder.radioStations,
-            popupDefault: station,
-            startLabel: "开始时间 (HH:MM):", startDefault: startAt,
-            secondLabel: "录制时长 (分钟):", secondDefault: duration,
-            outputInitial: dv(target?.output, fallback: "radio_\(station.lowercased()).m4a"),
-            nameInitial: dv(target?.name, fallback: "广播 \(station) \(startAt)"),
-            outputFormat: { "radio_\($0.lowercased()).m4a" },
-            nameFormat: { st, sa in "广播 \(st) \(sa)" })
+    /// the 转换为视频 checkbox INSIDE the form (launcher.py's osa_form radio
+    /// preset field order: ..., 输出文件名, 转换为视频 checkbox, 收藏名称) —
+    /// replacing the separate confirm alert (launcher.py:352-354 previously
+    /// asked `osa_confirm("录制完成后转换为视频？")` after the name dialog).
+    /// Unlike the other dialogs, unchecking does NOT bail the flow: a false
+    /// answer is stored as nil so `to_video` is omitted from JSON (default →
+    /// key omitted); a true answer is stored as true.
+    private static func radioPresetFlow(target: Preset?) {
+        let content = radioPresetAlert(target: target)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let st = content.popup.titleOfSelectedItem ?? ""
@@ -143,21 +130,36 @@ enum PresetFlows {
         guard !st.isEmpty, !start.isEmpty, !durationValue.isEmpty,
               !output.isEmpty, !name.isEmpty else { return }
 
-        // launcher.py:352-354: confirm BEFORE the name dialog. 取消 answers
-        // False — the flow still continues to save.
-        let toVideoAlert = NSAlert()
-        toVideoAlert.messageText = "\(title) — 广播"
-        toVideoAlert.informativeText = "录制完成后转换为视频？"
-        toVideoAlert.addButton(withTitle: "确认")
-        toVideoAlert.addButton(withTitle: "取消")
-        let toVideo = AlertPresenter.presentModal(toVideoAlert) == .alertFirstButtonReturn
-
+        let toVideo = content.checkbox?.state == .on
         commitPreset(Preset(
             name: name, action: .radio,
             channel: nil, station: st,
             timeStart: nil, timeEnd: nil,
             startAt: start, duration: durationValue, output: output,
             toVideo: toVideo ? true : nil), target: target)
+    }
+
+    /// QA hook (probe): builds the radio preset alert WITHOUT running a
+    /// modal — the exact construction `radioPresetFlow` presents, with
+    /// dv()-prefilled defaults. The 转换为视频 checkbox defaults OFF for a
+    /// new preset and ON for an edit target with toVideo == true.
+    static func radioPresetAlert(target: Preset? = nil) -> PresetAlertContent {
+        let station = dv(target?.station, fallback: "TBS")
+        let startAt = dv(target?.startAt, fallback: "21:00")
+        let duration = dv(target?.duration, fallback: "30")
+        return makePresetAlert(
+            title: "\(target == nil ? "新建收藏" : "修改收藏") — 广播",
+            popupLabel: "电台:",
+            options: CommandBuilder.radioStations,
+            popupDefault: station,
+            startLabel: "开始时间 (HH:MM):", startDefault: startAt,
+            secondLabel: "录制时长 (分钟):", secondDefault: duration,
+            outputInitial: dv(target?.output, fallback: "radio_\(station.lowercased()).m4a"),
+            nameInitial: dv(target?.name, fallback: "广播 \(station) \(startAt)"),
+            outputFormat: { "radio_\($0.lowercased()).m4a" },
+            nameFormat: { st, sa in "广播 \(st) \(sa)" },
+            checkboxLabel: "转换为视频",
+            checkboxDefault: target?.toVideo ?? false)
     }
 
     /// launcher.py:358-378: channel + 开始时间 + 时长 + output + name. All
@@ -343,11 +345,14 @@ enum PresetFlows {
 
     /// Builds one preset-save alert: messageText = flow title, accessory =
     /// NSGridView stacking [popup, 开始时间, second field, 输出文件名,
-    /// 收藏名称]. Field defaults are dv()-prefilled from the edit target
-    /// (or the launcher.py fallbacks for a new preset). The output default
-    /// follows the popup selection and the name default follows popup +
-    /// start time (launcher.py computes each default in a later sequential
-    /// dialog), both only while the user hasn't typed their own value.
+    /// (optional 转换为视频 checkbox), 收藏名称]. The checkbox row (radio
+    /// preset only) sits between 输出文件名 and 收藏名称, mirroring
+    /// launcher.py's osa_form radio preset field order. Field defaults are
+    /// dv()-prefilled from the edit target (or the launcher.py fallbacks for
+    /// a new preset). The output default follows the popup selection and the
+    /// name default follows popup + start time (launcher.py computes each
+    /// default in a later sequential dialog), both only while the user
+    /// hasn't typed their own value.
     private static func makePresetAlert(
         title: String,
         popupLabel: String,
@@ -358,7 +363,9 @@ enum PresetFlows {
         outputInitial: String,
         nameInitial: String,
         outputFormat: @escaping (String) -> String,
-        nameFormat: @escaping (String, String) -> String
+        nameFormat: @escaping (String, String) -> String,
+        checkboxLabel: String? = nil,
+        checkboxDefault: Bool = false
     ) -> PresetAlertContent {
         let alert = NSAlert()
         alert.messageText = title
@@ -379,13 +386,26 @@ enum PresetFlows {
         let outputField = NSTextField(string: outputInitial)
         let nameField = NSTextField(string: nameInitial)
 
-        let grid = NSGridView(views: [
+        let checkbox: NSButton?
+        if let checkboxLabel {
+            let button = NSButton(checkboxWithTitle: checkboxLabel, target: nil, action: nil)
+            button.state = checkboxDefault ? .on : .off
+            checkbox = button
+        } else {
+            checkbox = nil
+        }
+
+        var rows: [[NSView]] = [
             [label(popupLabel), popup],
             [label(startLabel), startField],
             [label(secondLabel), secondField],
             [label("输出文件名:"), outputField],
-            [label("收藏名称:"), nameField],
-        ])
+        ]
+        if let checkbox {
+            rows.append([label(""), checkbox])
+        }
+        rows.append([label("收藏名称:"), nameField])
+        let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
@@ -401,7 +421,8 @@ enum PresetFlows {
         return PresetAlertContent(
             alert: alert, popup: popup,
             startField: startField, secondField: secondField,
-            outputField: outputField, nameField: nameField, binder: binder)
+            outputField: outputField, nameField: nameField,
+            checkbox: checkbox, binder: binder)
     }
 
     /// Grid cell label: right-aligned, non-editable.
@@ -418,6 +439,8 @@ enum PresetFlows {
     /// Holds a preset-save alert's controls. `binder` is retained for the
     /// whole modal session so the popup action / text-field delegate keep
     /// firing — target/action holds no strong reference to its target.
+    /// `checkbox` is the optional 转换为视频 row (radio preset only), nil
+    /// for subtitle/tver forms.
     final class PresetAlertContent {
         let alert: NSAlert
         let popup: NSPopUpButton
@@ -425,12 +448,14 @@ enum PresetFlows {
         let secondField: NSTextField
         let outputField: NSTextField
         let nameField: NSTextField
+        let checkbox: NSButton?
         let binder: PresetSaveBinder
 
         init(
             alert: NSAlert, popup: NSPopUpButton,
             startField: NSTextField, secondField: NSTextField,
             outputField: NSTextField, nameField: NSTextField,
+            checkbox: NSButton?,
             binder: PresetSaveBinder
         ) {
             self.alert = alert
@@ -439,6 +464,7 @@ enum PresetFlows {
             self.secondField = secondField
             self.outputField = outputField
             self.nameField = nameField
+            self.checkbox = checkbox
             self.binder = binder
         }
     }
