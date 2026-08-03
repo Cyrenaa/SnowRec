@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
@@ -265,6 +265,18 @@ class AdTracker:
 
             if has_out and dr_id and dr_id not in self.seen_ids:
                 self.seen_ids.add(dr_id)
+                # TVer sends no SCTE35-IN: a new OUT is the real end of the
+                # previous ad (PLANNED-DURATION is only a fallback estimate).
+                if self.pending_planned:
+                    _, pstart, _ = self.pending_planned
+                    if pstart < start_dt:
+                        self.ad_intervals.append((pstart, start_dt))
+                    self.pending_planned = None
+                if self.pending_out:
+                    _, pstart = self.pending_out
+                    if pstart < start_dt:
+                        self.ad_intervals.append((pstart, start_dt))
+                    self.pending_out = None
                 planned = attrs.get("PLANNED-DURATION")
                 if planned:
                     try:
@@ -368,6 +380,8 @@ class VideoRecorder:
         self.segments = {}          # {seq: (filepath, is_ad)}
         self.segment_data = {}       # {seq: (filepath, is_ad, pdt, duration)}
         self.seen_sequences = set()
+        self.missing_seqs = set()    # seqs whose download ultimately failed
+        self.segment_meta = {}       # {seq: is_ad} for missing-seg reporting
         self.first_pdt = None       # PDT of first downloaded segment
         self.first_main_pdt = None   # PDT of first MAIN-content segment
         self.key_cache = {}
@@ -450,10 +464,19 @@ class VideoRecorder:
             else:
                 skipped_ad += 1
                 if pdt:
-                    pdt_to_time[pdt] = cumulative  # ad at same cumulative time
+                    pdt_to_time[pdt] = cumulative
+                # Ad time counts into the mapping: subtitles stay on the
+                # real-time axis (overall shift), like download_vtt mode.
+                cumulative += duration
 
         if skipped_ad:
             print(f"[{timestamp()}] 跳过 {skipped_ad} 个广告片段")
+        missing_main = [s for s in sorted(self.missing_seqs)
+                        if not self.segment_meta.get(s, False)]
+        if missing_main:
+            shown = ", ".join(str(s) for s in missing_main[:20])
+            more = f" ...共 {len(missing_main)} 个" if len(missing_main) > 20 else ""
+            print(f"[{timestamp()}] 警告: 正片片段缺失 seq={shown}{more}")
         if not main_files:
             print(f"[{timestamp()}] 没有正片片段可合并")
             return False, None
@@ -495,8 +518,25 @@ class VideoRecorder:
     def run_loop(self):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         executor = ThreadPoolExecutor(max_workers=self.concurrency)
+        pending = {}  # {future: seq} in-flight downloads
         try:
             while self.running:
+                # Never block polling on slow downloads: the ~20s HLS sliding
+                # window slides past unsubmitted segments while we wait.
+                if pending:
+                    done, _ = wait(list(pending), timeout=0,
+                                   return_when=FIRST_COMPLETED)
+                    for future in done:
+                        seq = pending.pop(future)
+                        try:
+                            result = future.result()
+                        except Exception:
+                            result = None
+                        if result is None:
+                            with self.lock:
+                                self.seen_sequences.discard(seq)
+                                self.missing_seqs.add(seq)
+
                 try:
                     resp = requests.get(self.m3u8_url, headers=HEADERS, timeout=15)
                     resp.raise_for_status()
@@ -539,19 +579,10 @@ class VideoRecorder:
                 for seq, url, is_ad, ki, pdt, dur in new_segs:
                     with self.lock:
                         self.seen_sequences.add(seq)
-
-                futures = {
-                    executor.submit(self.download_segment, seq, url, is_ad, ki, pdt, dur): seq
-                    for seq, url, is_ad, ki, pdt, dur in new_segs
-                }
-                for future in as_completed(futures):
-                    if not self.running:
-                        break
-                    result = future.result()
-                    if result is None:
-                        seq = futures[future]
-                        with self.lock:
-                            self.seen_sequences.discard(seq)
+                        self.segment_meta[seq] = is_ad
+                    pending[executor.submit(
+                        self.download_segment, seq, url, is_ad, ki, pdt, dur
+                    )] = seq
 
                 for _ in range(int(self.poll_interval * 10)):
                     if not self.running:
@@ -698,8 +729,23 @@ class SubtitleDownloader:
     def run_loop(self):
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         executor = ThreadPoolExecutor(max_workers=4)
+        pending = {}  # {future: seq} in-flight downloads
         try:
             while self.running:
+                # Same non-blocking reap as the video recorder.
+                if pending:
+                    done, _ = wait(list(pending), timeout=0,
+                                   return_when=FIRST_COMPLETED)
+                    for future in done:
+                        seq = pending.pop(future)
+                        try:
+                            result = future.result()
+                        except Exception:
+                            result = None
+                        if result is None:
+                            with self.lock:
+                                self.seen_sequences.discard(seq)
+
                 try:
                     resp = requests.get(self.m3u8_url, headers=HEADERS, timeout=15)
                     resp.raise_for_status()
@@ -725,13 +771,7 @@ class SubtitleDownloader:
                         self.seen_sequences.add(seq)
                         if pdt:
                             self.segment_pdts[seq] = pdt
-
-                futures = {executor.submit(self.download_vtt, seq, url): seq
-                           for seq, url, _ in new_segs}
-                for future in as_completed(futures):
-                    if not self.running:
-                        break
-                    future.result()
+                    pending[executor.submit(self.download_vtt, seq, url)] = seq
 
                 for _ in range(20):
                     if not self.running:
