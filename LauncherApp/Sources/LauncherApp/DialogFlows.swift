@@ -65,8 +65,21 @@ enum DialogFlows {
         guard !station.isEmpty, !startAt.isEmpty, !duration.isEmpty, !output.isEmpty else {
             return
         }
+
+        // launcher.py: `to_video = osa_confirm("转换为视频", ...)` — second
+        // 确认/取消 alert after the field dialog confirms.
+        let toVideoAlert = NSAlert()
+        toVideoAlert.messageText = "转换为视频"
+        toVideoAlert.informativeText = "录制完成后是否转换为视频 (需同名图片)？"
+        toVideoAlert.alertStyle = .informational
+        toVideoAlert.addButton(withTitle: "确认")
+        toVideoAlert.addButton(withTitle: "取消")
+        toVideoAlert.buttons[1].keyEquivalent = "\u{1b}"
+        let toVideo = AlertPresenter.presentModal(toVideoAlert) == .alertFirstButtonReturn
+
         startRadio(delegate: delegate, station: station,
-                   startAt: startAt, duration: duration, output: output)
+                   startAt: startAt, duration: duration, output: output,
+                   toVideo: toVideo)
     }
 
     /// Internal QA hook (`--alert-probe-test`): builds the REAL radio-flow
@@ -127,11 +140,13 @@ enum DialogFlows {
     @discardableResult
     static func startRadio(
         delegate: AppDelegate, station: String,
-        startAt: String, duration: String, output: String
+        startAt: String, duration: String, output: String,
+        toVideo: Bool = false
     ) -> Task {
         let cmd = CommandBuilder.radioCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
-            station: station, startAt: startAt, duration: duration, output: output)
+            station: station, startAt: startAt, duration: duration, output: output,
+            toVideo: toVideo)
         let end = LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration)
         return startFlow(
             delegate: delegate,
