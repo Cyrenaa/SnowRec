@@ -101,9 +101,12 @@ enum MenuBuilder {
         return item
     }
 
-    /// Disabled parent item carrying a submenu (收藏 / 最近 headers).
+    /// Parent item carrying a submenu (收藏 / 最近 headers). ENABLED but
+    /// action-less (rumps header semantics): no click action, yet the submenu
+    /// must expand on hover — a disabled NSMenuItem does NOT open its submenu.
     private static func parentItem(_ title: String, submenu: NSMenu) -> NSMenuItem {
-        let item = disabledItem(title)
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = true
         item.submenu = submenu
         return item
     }
