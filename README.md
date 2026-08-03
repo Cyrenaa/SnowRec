@@ -28,7 +28,7 @@ LauncherApp/     ──→  tver_wrapper.py / download_vtt.py / radiko_recorder.
 
 ## 1. tver_wrapper.py — Scheduled TVer Recording
 
-Schedules a recording, automatically resolves the TVer stream URL, and records video + subtitles.
+Schedules a recording, automatically resolves the TVer stream URL, and records video + subtitles. The subtitle URL resolved from the master manifest is passed to `live_recorder_sub.py` automatically via `--subtitle-url`; no manual step needed.
 
 | Argument | Type | Description |
 |----------|------|-------------|
@@ -122,6 +122,7 @@ Low-level recorder. Downloads HLS TS video segments and VTT subtitle segments, a
 | `url` | str (positional) | m3u8 playlist URL |
 | `-o, --output` | str | Video output; defaults to `output_<timestamp>.mp4` |
 | `-s, --subtitle` | str | Subtitle output; defaults to same name with `.srt` |
+| `--subtitle-url` | str | Subtitle m3u8 playlist URL (default: auto-detect) |
 | `-c, --concurrency` | int (default 8) | Number of concurrent downloads |
 | `-p, --poll-interval` | float (default 2.0) | Poll interval in seconds |
 | `-d, --duration` | float | Recording duration (minutes) |
@@ -149,14 +150,22 @@ Records Japanese radiko radio stations. Authenticates via the native radiko API 
 | `-d, --duration` | float (required) | Recording duration (minutes) |
 | `-c, --concurrency` | int (default 4) | Number of concurrent downloads |
 | `--start-at` | HH:MM | Scheduled start time (local time) |
+| `--to-video` | flag | After merging, combine with a same-name image (`../radio/pic/<name>.jpg`) into an MP4 video (requires ffmpeg) |
+| `--image-dir` | str | Same-name image directory (default: `../radio/pic`, relative to cwd) |
 | `--save-segments` | flag | Keep temporary segment files |
 
 ```bash
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
 
-# Schedule a 21:00 recording
-.venv/bin/python radiko_recorder.py TBS --start-at 21:00 -d 60 -o radio.m4a
+# Record a 21:00 broadcast and convert to MP4 with the same-name image
+.venv/bin/python radiko_recorder.py TBS --start-at 21:00 -d 60 -o radio.m4a --to-video
 ```
+
+`--to-video` behavior:
+- Looks for a same-name image `<image_dir>/<output-stem>.jpg|jpeg|png` (default `<cwd>/../radio/pic/`), e.g. `../name.m4a` → `../radio/pic/name.jpg`
+- Produces `<output-stem>.mp4` next to the audio file; the `.m4a` is kept
+- Encoding: `libx264 ultrafast + stillimage + crf 28`, input/output both 5 fps (static image; ~10 s for a 30-min broadcast on Apple Silicon)
+- Skips gracefully when ffmpeg or the image is missing (the recording itself is unaffected)
 
 ---
 
@@ -197,6 +206,17 @@ open LauncherApp/dist/LauncherApp.app
 
 The app appears as a ❄️ status item in the menu bar (no Dock icon). State persists to `~/.script_launcher.json` (with `.bak` backup); logs go to `~/.script_logs` (7-day cleanup, 20-entry history cap).
 
+**Menu features**:
+
+| Item | Description |
+|------|-------------|
+| `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task via dialogs. The radio flow asks 转换为视频 afterwards (equivalent to `--to-video`, needs a same-name image); confirming appends `--to-video` to the command |
+| `⭐ 收藏` | Presets: 新建收藏 / 管理收藏, plus clickable preset entries to run them. 修改 re-runs the full creation flow with the current values pre-filled, then overwrites the preset in place |
+| `🕐 最近` | Recent tasks with status; re-run a task or view its command/log |
+| `⏹ 停止全部` | Terminate all running tasks (shown only while tasks are active) |
+| `🔄 重启` | Restart the app; warns first when tasks are running (a relaunch kills leftover tasks via orphan recovery) |
+| `退出` | Quit |
+
 > **Deploy copy**: the deploy copy at `/Users/wyn/Documents/script/` (a separate git repo) is NOT auto-synced. After this repo switches its launcher to the Swift app, sync the deploy copy yourself.
 
 ---
@@ -225,5 +245,5 @@ caffeinate -s .venv/bin/python tver_wrapper.py \
 ## Notes
 
 - **Time zone**: all `--time-start`/`--time-end`/`--start-at` arguments use system local time. Set the system time zone to `Asia/Tokyo` (UTC+9) to input Japanese time directly.
-- **ffmpeg**: VTT→SRT conversion and segment merging depend on ffmpeg; install it beforehand.
+- **ffmpeg**: VTT→SRT conversion, segment merging, and `--to-video` conversion depend on ffmpeg; install it beforehand.
 - **Python path**: always use `.venv/bin/python`; the system python3 lacks the required dependencies.
