@@ -204,7 +204,7 @@ cd LauncherApp && ./scripts/package.sh
 open LauncherApp/dist/LauncherApp.app
 ```
 
-The app appears as a ❄️ status item in the menu bar (no Dock icon). State persists to `~/.script_launcher.json` (with `.bak` backup); logs go to `~/.script_logs` (7-day cleanup, 20-entry history cap).
+The app appears as a ❄️ status item in the menu bar (no Dock icon). State persists to `~/.script_launcher_dev.json` (with `.bak` backup); logs go to `~/.script_logs_dev` (7-day cleanup, 20-entry history cap). These dev-suffixed files are isolated from the legacy rumps launcher's `~/.script_launcher.json` / `~/.script_logs`, so the two can run side by side.
 
 **Menu features**:
 

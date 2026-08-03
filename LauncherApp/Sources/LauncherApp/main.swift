@@ -535,7 +535,7 @@ if CommandLine.arguments.contains("--history-test") {
             name: "info-test",
             cmd: ["caffeinate", "/usr/bin/python3", "-c", "print('x')"])
         running.startedAt = Date().addingTimeInterval(-3661)
-        running.logPath = "/tmp/snowrec-qa-home/.script_logs/info-test.log"
+        running.logPath = "/tmp/snowrec-qa-home/.script_logs_dev/info-test.log"
         print("--- running task (elapsed 1小时1分1秒) ---")
         print(HistoryFlows.infoText(for: running))
         // launcher.py:606: no startedAt → "已运行: -"

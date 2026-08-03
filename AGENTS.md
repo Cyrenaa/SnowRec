@@ -46,7 +46,7 @@ script/
 | `AppDelegate` | class | LauncherApp/Sources/LauncherApp/AppDelegate.swift | NSStatusItem app lifecycle + 5s menu rebuild |
 | `TaskManager` | enum | LauncherApp/Sources/LauncherApp/TaskManager.swift | Task spawn + log redirection + termination chain (swift-subprocess) |
 | `MenuBuilder` | enum | LauncherApp/Sources/LauncherApp/MenuBuilder.swift | Status-menu tree (parity with the legacy rumps GUI) |
-| `StateStore` | class | LauncherApp/Sources/LauncherApp/StateStore.swift | Atomic JSON persistence (`~/.script_launcher.json` + `.bak`) |
+| `StateStore` | class | LauncherApp/Sources/LauncherApp/StateStore.swift | Atomic JSON persistence (`~/.script_launcher_dev.json` + `.bak`) |
 | `OrphanRecovery` | enum | LauncherApp/Sources/LauncherApp/OrphanRecovery.swift | Kill orphan process groups + normalize history on launch |
 | `Notifications` | enum | LauncherApp/Sources/LauncherApp/Notifications.swift | Completion/failure banners + permission handling |
 | `CommandBuilder` | enum | LauncherApp/Sources/LauncherApp/CommandBuilder.swift | `caffeinate` command arrays (byte-identical to the legacy Python commands) |
@@ -111,5 +111,5 @@ open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
 - Git repo (remote: `github.com:Cyrenaa/SnowRec.git`); no requirements.txt, deps only recorded in README.
 - `LauncherApp` resolves the repo root via `SNOWREC_ROOT` env → `SnowRecRepoRoot` Info.plist → bundle-path walk (`RepoRoot.swift`), then calls `<repoRoot>/.venv/bin/python3` directly (the uv-created venv). macOS-only (AppKit/NSStatusItem), not cross-platform; `swift run`/debug binaries require `SNOWREC_ROOT`.
 - Long recordings must be wrapped in `caffeinate -s` to prevent Mac sleep.
-- LauncherApp persists `~/.script_launcher.json` (with `.bak` backup), logs to `~/.script_logs` (7-day cleanup, 20-entry history cap).
+- LauncherApp persists `~/.script_launcher_dev.json` (with `.bak` backup), logs to `~/.script_logs_dev` (7-day cleanup, 20-entry history cap). The `_dev` suffix isolates the dev launcher from the legacy launcher's `~/.script_launcher.json` / `~/.script_logs` (see `StoragePaths` in StateStore.swift).
 - Missing ffmpeg must degrade gracefully (catch `FileNotFoundError`, warn, continue) — never hard-fail.

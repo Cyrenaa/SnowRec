@@ -4,7 +4,8 @@ import Foundation
 ///
 /// These exist because the Swift rewrite must produce IDENTICAL strings to the
 /// Python launcher for log file names, menu labels, and the task info dialog —
-/// the deploy launcher still reads the same `~/.script_logs/` directory.
+/// the dev launcher writes to its own `~/.script_logs_dev/` directory,
+/// isolated from the legacy launcher's `~/.script_logs/`.
 enum LabelHelpers {
     // MARK: safeName
 
@@ -36,7 +37,7 @@ enum LabelHelpers {
     /// Parity with launcher.py:121-122: `ts = started_at.strftime("%Y%m%d_%H%M%S")`
     /// then `f"{ts}_{safe_name}.log"`. Uses the en_US_POSIX locale and the
     /// CURRENT timezone (Python strftime formats in local time; the real
-    /// `~/.script_logs/` names were produced under `Asia/Tokyo`).
+    /// `~/.script_logs_dev/` names were produced under `Asia/Tokyo`).
     static func logFileName(name: String, date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

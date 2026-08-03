@@ -1,7 +1,7 @@
 import Foundation
 
 /// Startup log pruning, mirroring launcher.py `_cleanup_old_logs`
-/// (lines 46-59) exactly: `.log` files in `~/.script_logs` older than
+/// (lines 46-59) exactly: `.log` files in `~/.script_logs_dev` older than
 /// 7 days are deleted on launch. Any failure is swallowed silently --
 /// cleanup must never crash the app.
 enum LogCleanup {
@@ -21,9 +21,10 @@ enum LogCleanup {
         return FileManager.default.homeDirectoryForCurrentUser
     }
 
-    /// Log directory path (`~/.script_logs`).
+    /// Log directory path (`~/.script_logs_dev`, dev-isolated from the
+    /// legacy launcher's `~/.script_logs`).
     static var logDirectory: URL {
-        homeDirectory.appendingPathComponent(".script_logs")
+        homeDirectory.appendingPathComponent(StoragePaths.logDirectoryName)
     }
 
     /// Deletes every `*.log` file whose modification time is older than

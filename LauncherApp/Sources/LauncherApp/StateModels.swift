@@ -42,7 +42,7 @@ struct HistoryEntry: Codable, Sendable {
     var log: String?
 }
 
-/// The whole state file (`~/.script_launcher.json`). Top-level keys may be
+/// The whole state file (`~/.script_launcher_dev.json`). Top-level keys may be
 /// missing from real files, in which case they default to empty arrays.
 struct StateFile: Codable, Sendable {
     var presets: [Preset]

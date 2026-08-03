@@ -19,7 +19,7 @@ final class Task {
     var status: String
     /// When the task started (launcher.py:113, set by `start()` in T13).
     var startedAt: Date?
-    /// Log file path under `~/.script_logs/` (launcher.py:114).
+    /// Log file path under `~/.script_logs_dev/` (launcher.py:114).
     var logPath: String?
     /// Snapshot of the persisted history entry (launcher.py:112).
     var historyEntry: HistoryEntry?
