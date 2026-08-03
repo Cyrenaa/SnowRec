@@ -70,12 +70,13 @@ enum MenuBuilder {
         }
         menu.addItem(parentItem("🕐 最近", submenu: historyMenu))
 
-        // Stop-all + quit (launcher.py:299-303).
+        // Stop-all + restart + quit (launcher.py:299-304).
         menu.addItem(.separator())
         if !active.isEmpty {
             menu.addItem(disabledItem("⏹ 停止全部"))
         }
         menu.addItem(.separator())
+        menu.addItem(disabledItem("🔄 重启"))
         menu.addItem(disabledItem("退出"))
 
         return menu

@@ -130,6 +130,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.target = self
                 item.action = #selector(killAllAction)
                 item.isEnabled = true
+            case "🔄 重启":
+                // launcher.py:303 callback = _restart_app.
+                item.target = self
+                item.action = #selector(restartAction)
+                item.isEnabled = true
             case "退出":
                 // launcher.py:303 callback = rumps.quit_application.
                 item.target = self
@@ -280,10 +285,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// 退出 = NSApp.terminate (launcher.py:303 rumps.quit_application).
+    /// 退出 = NSApp.terminate (launcher.py:304 rumps.quit_application).
     /// Child processes are NOT touched — they become orphans and are
     /// recovered on the next launch (OrphanRecovery, todo 10).
     @objc private func quitAction() {
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Restart action (launcher.py:310-320 _restart_app)
+
+    /// launcher.py:310-320: confirm when active tasks exist (a relaunch
+    /// would terminate them), then _save_data() parity and relaunch.
+    @objc private func restartAction() {
+        let active = tasks.filter { MenuBuilder.activeStatuses.contains($0.status) }
+        if !active.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "重启"
+            alert.informativeText = "有 \(active.count) 个任务正在运行，重启后将被终止，确定重启？"
+            alert.addButton(withTitle: "确认")
+            alert.addButton(withTitle: "取消")
+            alert.buttons[1].keyEquivalent = "\u{1b}"
+            guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
+        }
+        // launcher.py:315 _save_data() parity: persist current state before
+        // the relaunch.
+        StateStore().save(StateStore().load())
+        RestartSupport.performRestart()
     }
 }
