@@ -8,12 +8,12 @@ Japanese TV/radio recording and subtitle extraction toolset (macOS). 5 standalon
 script/
 ├── tver_wrapper.py        # TVer scheduled recording orchestration (scheduling layer)
 ├── tver_fetch_url.py      # Playwright scrape of TVer m3u8 stream URLs (low-level)
-├── live_recorder_sub.py   # HLS recorder: TS video + VTT subtitles + SCTE35 ad skip (low-level)
+├── live_recorder_sub.py   # HLS recorder: TS video + VTT subtitles + SCTE35 ad skip; --subtitle-url explicit subtitle stream (low-level)
 ├── download_vtt.py        # VTT subtitle download/merge/convert to SRT (6 modes)
-├── radiko_recorder.py     # radiko radio recording (standalone, no internal deps)
+├── radiko_recorder.py     # radiko radio recording; --to-video + --image-dir convert to MP4 (standalone, no internal deps)
 ├── LauncherApp/           # native macOS menu-bar GUI (Swift/AppKit), schedules the scripts above
 │   ├── Package.swift      # SwiftPM manifest (swift-subprocess 0.5, macOS 13+)
-│   ├── Sources/LauncherApp/  # 16 .swift files (AppDelegate, TaskManager, MenuBuilder, StateStore, ...)
+│   ├── Sources/LauncherApp/  # 18 .swift files (AppDelegate, TaskManager, MenuBuilder, AlertPresenter, RestartSupport, ...)
 │   └── scripts/package.sh # assembles dist/LauncherApp.app (ad-hoc signed)
 ├── pyproject.toml         # uv project metadata (no build-system); deps locked in uv.lock
 ├── README.md              # the only authoritative doc: all CLI args and usage
@@ -54,6 +54,8 @@ script/
 | `DialogFlows` | enum | LauncherApp/Sources/LauncherApp/DialogFlows.swift | New-task dialogs (subtitle / radio / TVer) |
 | `PresetFlows` | enum | LauncherApp/Sources/LauncherApp/PresetFlows.swift | Preset create / rename / delete / run |
 | `HistoryFlows` | enum | LauncherApp/Sources/LauncherApp/HistoryFlows.swift | Task-info + history detail / rerun / clear |
+| `RestartSupport` | enum | LauncherApp/Sources/LauncherApp/RestartSupport.swift | App relaunch: bundle-mode `NSWorkspace.open` / reexec via `posix_spawn` + `POSIX_SPAWN_SETSID` |
+| `AlertPresenter` | enum | LauncherApp/Sources/LauncherApp/AlertPresenter.swift | Centralized `NSAlert` modal presentation (activates app first; never bare `runModal`) |
 
 Call chain: `LauncherApp → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_wrapper → tver_fetch_url → live_recorder_sub`; `download_vtt → tver_fetch_url`. Scripts talk via `subprocess.run([sys.executable, ...])` + `--json` stdout protocol.
 
@@ -98,7 +100,7 @@ caffeinate -s .venv/bin/python tver_wrapper.py --tver-page https://tver.jp/live/
 .venv/bin/python download_vtt.py --tver-page https://tver.jp/live/tbs --time-start 20:00 --time-end 21:00
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
 cd LauncherApp && swift build           # build the menu-bar GUI
-cd LauncherApp && ./scripts/package.sh  # package into dist/LauncherApp.app (ad-hoc signed)
+cd LauncherApp && ./scripts/package.sh  # package into dist/LauncherApp.app (ad-hoc signed); must be re-run after any Swift change to update the shipped dist
 open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
 
 # No test / lint / build / CI commands
