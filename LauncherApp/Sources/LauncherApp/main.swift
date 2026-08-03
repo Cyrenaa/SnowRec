@@ -875,6 +875,18 @@ func runAlertProbe() -> Never {
     }
     let buttons = content.alert.buttons
     print("probeButtons=\(buttons.map(\.title))")
+    if let checkbox = content.checkbox {
+        print("probeCheckbox=\(checkbox.title):\(checkbox.state == .on ? "on" : "off")")
+    }
+    let presetNew = PresetFlows.radioPresetAlert()
+    print("probePresetCheckboxNew=\(presetNew.checkbox?.title ?? "-"):\(presetNew.checkbox?.state == .on ? "on" : "off")")
+    var editPreset = Preset(
+        name: "RADIO TV", action: .radio, channel: nil, station: "TBS",
+        timeStart: nil, timeEnd: nil, startAt: "21:00", duration: "30",
+        output: "radio_tbs.m4a", toVideo: nil)
+    editPreset.toVideo = true
+    let presetEdit = PresetFlows.radioPresetAlert(target: editPreset)
+    print("probePresetCheckboxEdit=\(presetEdit.checkbox?.title ?? "-"):\(presetEdit.checkbox?.state == .on ? "on" : "off")")
     if let view = content.alert.window.contentView,
        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -886,6 +898,11 @@ func runAlertProbe() -> Never {
     let verdict = ProbeVerdict()
     let app = NSApplication.shared
     let buttonTitles = buttons.map(\.title)
+    // Snapshot the checkbox verdicts BEFORE the detached @Sendable task
+    // (NSButton is not Sendable — d1805b0 buttons trap).
+    let checkboxOk = content.checkbox?.title == "转换为视频" && content.checkbox?.state == .off
+    let presetNewOk = presetNew.checkbox?.state == .off
+    let presetEditOk = presetEdit.checkbox?.state == .on
     Swift.Task.detached {
         try? await Swift.Task.sleep(for: .seconds(3))
         let during = captureLauncherWindows()
@@ -893,7 +910,7 @@ func runAlertProbe() -> Never {
         for window in during { print("probeDuringWindow=\(window.line)") }
         let windowOk = during.contains { $0.w >= 200 && $0.h >= 100 }
         let buttonsOk = buttonTitles.count >= 2 && buttonTitles[0] == "确认"
-        verdict.set(windowOk && buttonsOk)
+        verdict.set(windowOk && buttonsOk && checkboxOk && presetNewOk && presetEditOk)
         _ = app.perform(NSSelectorFromString("abortModal"))
         try? await Swift.Task.sleep(for: .seconds(10))
         print("probeTimeout=abortModal did not wake the modal loop")
