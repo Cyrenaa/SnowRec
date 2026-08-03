@@ -222,6 +222,9 @@ enum DialogFlows {
         let alert = NSAlert()
         alert.messageText = title
         alert.alertStyle = .informational
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
 
         let popup = NSPopUpButton()
         popup.addItems(withTitles: options)
