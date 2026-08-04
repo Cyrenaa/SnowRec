@@ -72,6 +72,7 @@ Downloads VTT segments from the HLS subtitle stream and merges them, outputting 
 | `--time-end` | str | End time `HH:MM` |
 | `--output` | str | Output file; defaults to `merged_shifted.vtt` |
 | `--no-srt` | flag | Skip SRT conversion |
+| `--history` | flag | 窗口已过时直接回看下载历史字幕（默认顺延到明天同一时段） |
 | `--keep` | flag | Keep the temporary `vtt_files/` directory |
 | `--fetch-timeout` | int (default 60) | Stream URL fetch timeout in seconds |
 
@@ -110,6 +111,7 @@ Mode ① internal logic:
 - Window **not started**: sleeps until 30 seconds before the start
 - Window **in progress**: Phase 1 (trace back history) + Phase 2 (poll playlist for new segments) in parallel
 - Window **finished**: falls back to a full forward scan
+- Window **already past**: rolls forward to the same time tomorrow by default; pass `--history` to scan the past window directly
 
 ---
 

@@ -26,7 +26,9 @@ script/
 | Task | Location |
 |------|----------|
 | New TVer recording flow | `tver_wrapper.py` (orchestration) + `live_recorder_sub.py` (recording) |
-| Subtitle timeline/window math | `download_vtt.py`: `parse_local_time_window`, `get_time_range_ms`, `shift_time_line` |
+| Subtitle timeline/window math | `download_vtt.py`: `parse_local_time_window`, `get_time_range_ms`, `shift_time_line`, `resolve_window_dates` |
+| Subtitle merge / VTT time-line math | `download_vtt.py`: `merge_text`, `merge_time_lines`, `time_line_dur_ms` (also `live_recorder_sub.py`: `merge_text`) |
+| Parallel past-window ID scan | `download_vtt.py`: no-playlist `phase2_forward` scan, 16-worker `ThreadPoolExecutor` (~line 1351) |
 | Ad-skip logic | `live_recorder_sub.py`: `AdTracker` (SCTE35 daterange parsing) |
 | radiko auth | `radiko_recorder.py`: `RadikoAuth` (auth1/auth2) |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
@@ -37,6 +39,10 @@ script/
 | Symbol | Type | Location | Role |
 |--------|------|----------|------|
 | `main_live_window` | function | download_vtt.py:954 | Phase 1 history trace-back + Phase 2 polling in parallel |
+| `resolve_window_dates` | function | download_vtt.py:250 | Past-window rollover to tomorrow unless `--history` |
+| `time_line_dur_ms` | function | download_vtt.py:82 | VTT time-line duration in ms |
+| `merge_time_lines` | function | download_vtt.py:93 | Merge two VTT cue time lines |
+| `merge_text` | function | download_vtt.py:110 / live_recorder_sub.py:169 | Merge VTT cue text (dedup) |
 | `State` | class | download_vtt.py:227 | Cross-thread output state (Lock-protected) |
 | `AdTracker` | class | live_recorder_sub.py:225 | SCTE35 ad-interval tracking |
 | `VideoRecorder` | class | live_recorder_sub.py:353 | TS segment download + decrypt + ffmpeg merge |
