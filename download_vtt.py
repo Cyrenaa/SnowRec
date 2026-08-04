@@ -247,6 +247,19 @@ def note_to_local(dt: datetime) -> datetime:
     return dt.astimezone().replace(tzinfo=None)
 
 
+def resolve_window_dates(start_time: str, end_time: str, ref_date,
+                         now=None, history_mode: bool = False):
+    """Resolve the time window; past windows roll to tomorrow unless
+    history_mode (--history) explicitly asks for a past-window scan."""
+    target_start, target_end = parse_local_time_window(start_time, end_time, ref_date)
+    if not history_mode:
+        now = now or datetime.now().astimezone()
+        if target_end <= now:
+            target_start += timedelta(days=1)
+            target_end += timedelta(days=1)
+    return target_start, target_end
+
+
 # ============================================================
 # 状态
 # ============================================================
@@ -996,7 +1009,8 @@ def main_timewindow(url: str, start_time: str, end_time: str,
 
 def main_live_window(url: str, start_time: str, end_time: str,
                      output_file: str | None = None,
-                     playlist_url: str | None = None):
+                     playlist_url: str | None = None,
+                     history_mode: bool = False):
     global OUTPUT_FILE
     if output_file:
         OUTPUT_FILE = Path(output_file)
@@ -1073,8 +1087,10 @@ def main_live_window(url: str, start_time: str, end_time: str,
                 return
 
     ref_date = ref_notes[0].date()
-    target_start, target_end = parse_local_time_window(
-        start_time, end_time, ref_date)
+    target_start, target_end = resolve_window_dates(
+        start_time, end_time, ref_date, history_mode=history_mode)
+    if target_start.date() > ref_date:
+        print(f"[WAIT] 窗口 {start_time}~{end_time} 今日已过，自动顺延到明天")
 
     if datetime.now().astimezone() >= target_end + timedelta(minutes=MAX_LATE_MINUTES):
         print(f"[LIVE] 窗口已结束，用 playlist PDT 直接定位 ID 范围")
@@ -1558,6 +1574,8 @@ if __name__ == "__main__":
     parser.add_argument("--time-start", help="起始时间 (HH:MM, 本地时间)")
     parser.add_argument("--time-end", help="结束时间 (HH:MM, 本地时间)")
     parser.add_argument("--no-srt", action="store_true", help="跳过 SRT 转换")
+    parser.add_argument("--history", action="store_true",
+                        help="窗口已过时直接回看下载历史字幕（默认顺延到明天同一时段）")
     parser.add_argument("--fetch-timeout", type=int, default=60, help="获取 m3u8 链接的超时秒数 (默认: 60)")
     args = parser.parse_args()
 
@@ -1579,7 +1597,8 @@ if __name__ == "__main__":
 
             main_live_window(anchor_url, args.time_start,
                              args.time_end, args.output,
-                             playlist_url=playlist_url)
+                             playlist_url=playlist_url,
+                             history_mode=args.history)
 
         elif args.url and args.time_start and args.time_end:
             main_timewindow(args.url, args.time_start, args.time_end, args.output)
