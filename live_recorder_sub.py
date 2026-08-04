@@ -166,6 +166,24 @@ def clean_vtt_text(text: str) -> str:
     return text.strip()
 
 
+def merge_text(a: str, b: str) -> str:
+    """Merge two cue texts: keep the longer when one contains the other,
+    otherwise join on the longest suffix/prefix overlap (ported from
+    download_vtt.py)."""
+    if a == b:
+        return a
+    if b.startswith(a):
+        return b
+    if a.startswith(b):
+        return a
+    max_overlap = 0
+    max_len = min(len(a), len(b))
+    for i in range(1, max_len + 1):
+        if a[-i:] == b[:i]:
+            max_overlap = i
+    return a + b[max_overlap:]
+
+
 def parse_vtt_time(t):
     parts = t.strip().split(":")
     if len(parts) == 3:
@@ -683,15 +701,35 @@ class SubtitleDownloader:
             except Exception as e:
                 print(f"[{timestamp()}] 解析字幕 seq={seq} 失败: {e}")
 
-        # Sort and dedup
+        # Text-based rolling dedup (ported from download_vtt.process_file):
+        # live VTT re-emits captions with shifted timestamps, so exact
+        # (start, end, text) keys cannot catch repeats.
         all_cues.sort(key=lambda x: (x[0], x[1]))
-        seen = set()
         unique_cues = []
         for s, e, t in all_cues:
-            key = (round(s, 3), round(e, 3), t)
-            if key not in seen:
-                seen.add(key)
-                unique_cues.append((s, e, t))
+            if unique_cues:
+                ls, le, lt = unique_cues[-1]
+                if t == lt:
+                    # Re-emitted truncated copy + full-length copy: cover
+                    # both time ranges (short + long) instead of either one.
+                    unique_cues[-1] = (min(s, ls), max(e, le), t)
+                    continue
+                if abs(s - ls) < 0.05:
+                    merged = merge_text(lt, t)
+                    if len(unique_cues) >= 2 and merged == unique_cues[-2][2]:
+                        # Previous cue was the first half of this same
+                        # two-line caption re-emitted in the next segment:
+                        # merge both copies into one cue covering both ranges.
+                        unique_cues[-2] = (
+                            min(s, unique_cues[-2][0]),
+                            max(e, unique_cues[-2][1]),
+                            merged,
+                        )
+                        unique_cues.pop()
+                        continue
+                    unique_cues[-1] = (ls, max(le, e), merged)
+                    continue
+            unique_cues.append((s, e, t))
 
         vtt_lines = ["WEBVTT", ""]
         for _, (start, end, text) in enumerate(unique_cues, 1):

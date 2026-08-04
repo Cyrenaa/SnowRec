@@ -79,6 +79,34 @@ def shift_time_line(time_line: str, offset_ms: int) -> str:
     return f"{ms_to_time(start)} --> {ms_to_time(end)}"
 
 
+def time_line_dur_ms(time_line: str) -> int:
+    """Return cue duration in ms from a VTT timing line."""
+    m = re.match(
+        r"(\d+:\d+:\d+\.\d+)\s+-->\s+(\d+:\d+:\d+\.\d+)",
+        time_line,
+    )
+    if not m:
+        return 0
+    return time_to_ms(m.group(2)) - time_to_ms(m.group(1))
+
+
+def merge_time_lines(a: str, b: str) -> str:
+    """Merge two timing lines into one covering both cue ranges."""
+    m1 = re.match(
+        r"(\d+:\d+:\d+\.\d+)\s+-->\s+(\d+:\d+:\d+\.\d+)",
+        a,
+    )
+    m2 = re.match(
+        r"(\d+:\d+:\d+\.\d+)\s+-->\s+(\d+:\d+:\d+\.\d+)",
+        b,
+    )
+    if not m1 or not m2:
+        return a
+    s1, e1 = time_to_ms(m1.group(1)), time_to_ms(m1.group(2))
+    s2, e2 = time_to_ms(m2.group(1)), time_to_ms(m2.group(2))
+    return f"{ms_to_time(min(s1, s2))} --> {ms_to_time(max(e1, e2))}"
+
+
 def merge_text(a: str, b: str) -> str:
     if a == b:
         return a
@@ -272,10 +300,25 @@ def process_file(file_id: int, raw: str, state: State) -> int:
 
             if last_time == shifted_time:
                 merged = merge_text(last_text, body_text)
+                if len(state.merged_blocks) >= 2 and merged == state.merged_blocks[-2][1]:
+                    # Same two-line caption re-emitted in the next segment:
+                    # merge both copies into one cue covering both ranges.
+                    state.merged_blocks[-2] = (
+                        merge_time_lines(state.merged_blocks[-2][0], shifted_time),
+                        merged,
+                    )
+                    state.merged_blocks.pop()
+                    continue
                 state.merged_blocks[-1] = (shifted_time, merged)
                 continue
 
             if body_text == last_text:
+                # Re-emitted truncated copy + full-length copy: cover both
+                # time ranges instead of keeping either one.
+                state.merged_blocks[-1] = (
+                    merge_time_lines(last_time, shifted_time),
+                    body_text,
+                )
                 continue
 
         state.merged_blocks.append((shifted_time, body_text))
