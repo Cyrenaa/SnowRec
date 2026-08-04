@@ -1336,44 +1336,78 @@ def main_live_window(url: str, start_time: str, end_time: str,
                               f"{note_to_local(next_ready).strftime('%H:%M:%S')} 本地)")
                         time.sleep(wait)
             else:
-                # 无 playlist_url: ID 扫描模式（简化版，主路径用 playlist）
+                # 无 playlist_url: ID 扫描模式, 并行下载加速
+                from concurrent.futures import (ThreadPoolExecutor,
+                                                wait as futures_wait,
+                                                FIRST_COMPLETED)
                 scan_id = boundary_id + 1
-                consecutive_404 = 0
 
-                while running[0]:
-                    now = datetime.now().astimezone()
-                    if now > target_end + timedelta(minutes=MAX_LATE_MINUTES):
-                        running[0] = False
-                        break
-
-                    with lock:
-                        collected_ids = set(collected.keys())
-                    if scan_id in collected_ids:
-                        scan_id += 1
-                        continue
-
-                    raw = download_one(template, scan_id, headers)
+                def fetch_one(sid):
+                    raw = download_one(template, sid, headers)
                     if raw is None:
-                        consecutive_404 += 1
-                        if consecutive_404 >= 20:
-                            scan_id += 1
-                            consecutive_404 = 0
-                        time.sleep(2)
-                        continue
+                        raw = download_one(template, sid, headers)
+                    return sid, raw
 
-                    consecutive_404 = 0
-                    notes = extract_note_timestamps(raw)
-                    if notes:
-                        pdt = min(notes)
-                        if _in_window(pdt):
-                            with lock:
-                                collected[scan_id] = raw
-                            count += 1
-                        elif pdt > target_end:
+                with ThreadPoolExecutor(max_workers=16) as executor:
+                    pending = {}
+                    # 预填并发窗口
+                    while len(pending) < 16:
+                        pending[executor.submit(fetch_one, scan_id)] = scan_id
+                        scan_id += 1
+
+                    while pending and running[0]:
+                        now = datetime.now().astimezone()
+                        if now > target_end + timedelta(minutes=MAX_LATE_MINUTES):
                             running[0] = False
                             break
-                    scan_id += 1
-                    time.sleep(SUCCESS_DELAY)
+
+                        done, _ = futures_wait(
+                            list(pending), timeout=0,
+                            return_when=FIRST_COMPLETED)
+                        for fut in done:
+                            sid = pending.pop(fut)
+                            try:
+                                _, raw = fut.result()
+                            except Exception:
+                                raw = None
+                            if raw is None:
+                                continue
+                            notes = extract_note_timestamps(raw)
+                            if notes:
+                                pdt = min(notes)
+                                if _in_window(pdt):
+                                    with lock:
+                                        collected[sid] = raw
+                                    count += 1
+                                    pdt_local = note_to_local(pdt)
+                                    print(f"  [SCAN] id={sid} "
+                                          f"({pdt_local.strftime('%H:%M:%S')} 本地)"
+                                          f" 共 {len(collected)} 个")
+                                elif pdt > target_end:
+                                    running[0] = False
+                                    break
+
+                        # 补充并发窗口
+                        while len(pending) < 16 and running[0]:
+                            pending[executor.submit(fetch_one, scan_id)] = scan_id
+                            scan_id += 1
+
+                    # 收割剩余任务
+                    for fut in list(pending):
+                        sid = pending.pop(fut)
+                        try:
+                            _, raw = fut.result()
+                        except Exception:
+                            raw = None
+                        if raw is None:
+                            continue
+                        notes = extract_note_timestamps(raw)
+                        if notes:
+                            pdt = min(notes)
+                            if _in_window(pdt):
+                                with lock:
+                                    collected[sid] = raw
+                                count += 1
 
         print(f"[Phase 2] 结束: 共收集 {count} 个新分段")
 
