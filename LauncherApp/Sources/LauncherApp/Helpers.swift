@@ -61,7 +61,9 @@ enum LabelHelpers {
     ///   here so " 21 " / "+21" behave like Python (rejected otherwise).
     /// - float() accepts "0.1" (→ 6 seconds, dropped by %H:%M → "21:00") and
     ///   "1e3"; Swift Double() agrees on both. float() also accepts "inf"/"nan"
-    ///   and "_" separators — intentionally not replicated (never hit in QA).
+    ///   and "_" separators — "inf"/"nan" are REJECTED here (isFinite guard,
+    ///   parity with launcher.py _safe_float 6a4bd3c: a non-finite duration
+    ///   would produce an invalid Date and an empty formatted string).
     /// - Python datetime.replace(hour=24) raises ValueError → "?"; the range
     ///   guard here mirrors that.
     static func endTimeLabel(startAt: String, durationMin: String) -> String {
@@ -70,7 +72,8 @@ enum LabelHelpers {
               let h = parsePythonInt(String(parts[0])),
               let m = parsePythonInt(String(parts[1])),
               (0...23).contains(h), (0...59).contains(m),
-              let minutes = Double(durationMin.trimmingCharacters(in: .whitespaces))
+              let minutes = Double(durationMin.trimmingCharacters(in: .whitespaces)),
+              minutes.isFinite
         else {
             return "?"
         }

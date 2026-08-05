@@ -337,10 +337,14 @@ enum PresetFlows {
                 repoRoot: root, channel: preset.channel ?? "",
                 startAt: preset.startAt ?? "", duration: preset.duration ?? "",
                 output: preset.output ?? "")
-            // I6/I3 parity with launcher.py _run_preset: non-numeric stored
-            // duration -> silent skip; >24h -> confirm, cancel = skip. The
-            // returned Task is built but never appended/spawned (skip marker).
-            if let dur = preset.duration.flatMap(Double.init) {
+            // Parity with launcher.py _run_preset + 6a4bd3c: non-numeric,
+            // non-finite (nan/inf/-inf — Swift Double("inf") parses like
+            // Python float("inf")), or non-positive duration -> silent skip
+            // (the Python side falls back to None / skips <=0); >24h ->
+            // confirm, cancel = skip. The returned Task is built but never
+            // appended/spawned (skip marker).
+            if let dur = preset.duration.flatMap(Double.init),
+               dur.isFinite, dur > 0 {
                 guard AlertPresenter.confirmLongDuration(minutes: dur) else {
                     return Task(name: preset.name, cmd: cmd)
                 }
