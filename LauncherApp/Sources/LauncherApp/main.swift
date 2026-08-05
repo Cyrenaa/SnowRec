@@ -34,6 +34,16 @@ if CommandLine.arguments.contains("--dump-helpers") {
     print("endTime5=\(LabelHelpers.endTimeLabel(startAt: "21:00", durationMin: "0.1"))")
     print("elapsed1=\(LabelHelpers.elapsedLabel(seconds: 3661))")
     print("elapsed2=\(LabelHelpers.elapsedLabel(seconds: 0))")
+    func dm(_ s: String, _ e: String) -> String {
+        LabelHelpers.durationMin(startAt: s, endTime: e).map { String($0) } ?? "nil"
+    }
+    print("durationMin1=\(dm("21:00", "22:00"))")   // 60.0
+    print("durationMin2=\(dm("23:30", "00:30"))")   // 60.0
+    print("durationMin3=\(dm("xx", "22:00"))")      // nil
+    print("durationMin4=\(dm("22:00", "21:00"))")   // 1380.0
+    print("presetNameSubtitle=\(PresetFlows.presetNameDefault(action: .subtitle, channel: "TBS"))")  // 字幕 TBS 19:00
+    print("presetNameRadio=\(PresetFlows.presetNameDefault(action: .radio, channel: "TBS"))")        // 广播 TBS 21:00
+    print("presetNameTver=\(PresetFlows.presetNameDefault(action: .tver, channel: "TBS"))")          // TBS 21:00
     exit(0)
 }
 
@@ -60,6 +70,10 @@ if CommandLine.arguments.contains("--dump-builders") {
         repoRoot: root, channel: "CX (富士)",
         timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)")
     print("subtitle=\(json(subtitleCmd))")
+    let subtitleHistoryCmd = CommandBuilder.subtitleCommand(
+        repoRoot: root, channel: "CX (富士)",
+        timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)", history: true)
+    print("subtitleHistory=\(json(subtitleHistoryCmd))")
     let radioCmd = CommandBuilder.radioCommand(
         repoRoot: root, station: "TBS",
         startAt: "21:00", duration: "30", output: "radio_tbs.m4a")
@@ -347,12 +361,12 @@ if CommandLine.arguments.contains("--flow-test") {
 // --preset-test <new|rename|modify|delete|run>: scripted preset-management
 // QA with NO dialogs (pattern of --flow-test). Operates on the persisted
 // state:
-//   new    — append the scripted tver preset (TBS / 21:00 / "60" / tbs.mp4 /
-//            name "TBS 21:00") and print presets JSON
+//   new    — append the scripted tver preset (TBS / 21:00 / "60.0" / endTime
+//            22:00 / tbs.mp4 / name "TBS 21:00") and print presets JSON
 //   rename — rename the LAST preset to "NEW NAME" (missing → no-op, exit 0)
 //   modify — ensure the scripted preset exists (create it when missing),
-//            overwrite its fields in place (duration "45", output "tbs2.mp4"
-//            — QA of edit-style persistence; toVideo stays nil since the
+//            overwrite its fields in place (duration "45", endTime "21:45",
+//            output "tbs2.mp4" — QA of edit-style persistence; toVideo stays nil since the
 //            scripted preset is tver) and, if a radio preset named
 //            "RADIO TV" exists, set toVideo=true (QA of to_video
 //            round-trip); print presets JSON
@@ -372,11 +386,12 @@ struct PresetTestResult: Codable {
 }
 
 /// The scripted tver preset created by `--preset-test new`/`run`
-/// (spec: TBS, 21:00, "60", tbs.mp4, name "TBS 21:00").
+/// (spec: TBS, 21:00, "60.0", endTime 22:00, tbs.mp4, name "TBS 21:00").
 func scriptedTverPreset() -> Preset {
     Preset(name: "TBS 21:00", action: .tver, channel: "TBS",
            station: nil, timeStart: nil, timeEnd: nil,
-           startAt: "21:00", duration: "60", output: "tbs.mp4")
+           startAt: "21:00", duration: "60.0", output: "tbs.mp4",
+           endTime: "22:00")
 }
 
 if CommandLine.arguments.contains("--preset-test") {
@@ -437,11 +452,13 @@ if CommandLine.arguments.contains("--preset-test") {
         if let idx = state.presets.firstIndex(where: { $0.name == "TBS 21:00" }) {
             state.presets[idx].duration = "45"
             state.presets[idx].output = "tbs2.mp4"
+            state.presets[idx].endTime = "21:45"
         } else {
             state.presets.append(scriptedTverPreset())
             if let idx = state.presets.firstIndex(where: { $0.name == "TBS 21:00" }) {
                 state.presets[idx].duration = "45"
                 state.presets[idx].output = "tbs2.mp4"
+                state.presets[idx].endTime = "21:45"
             }
         }
         if let radioIdx = state.presets.firstIndex(where: { $0.name == "RADIO TV" }) {
