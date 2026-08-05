@@ -92,6 +92,50 @@ enum LabelHelpers {
         return formatter.string(from: end)
     }
 
+    // MARK: durationMin
+
+    /// Parity with launcher.py:676-690 `_duration_min`.
+    ///
+    /// Minutes from start to end; end <= start rolls to the next day.
+    /// Parses both "HH:MM" values into Int parts (whitespace and leading "+"
+    /// tolerated via parsePythonInt, mirroring Python int()), builds `today at
+    /// h:m` for each (`datetime.now().replace(hour=h, minute=m, second=0,
+    /// microsecond=0)`), rolls end +1 day when end <= start, and returns
+    /// `(end - start).total_seconds() / 60.0`. Any parse error → nil.
+    ///
+    /// Python datetime.replace raises ValueError for hour 24+ / minute 60+,
+    /// and int() raises for empty/partial parts — the explicit 0...23 / 0...59
+    /// guards and part-count checks replicate those exception paths.
+    static func durationMin(startAt: String, endTime: String) -> Double? {
+        let startParts = startAt.split(separator: ":")
+        let endParts = endTime.split(separator: ":")
+        guard startParts.count >= 2, endParts.count >= 2,
+              let sh = parsePythonInt(String(startParts[0])),
+              let sm = parsePythonInt(String(startParts[1])),
+              let eh = parsePythonInt(String(endParts[0])),
+              let em = parsePythonInt(String(endParts[1])),
+              (0...23).contains(sh), (0...59).contains(sm),
+              (0...23).contains(eh), (0...59).contains(em)
+        else {
+            return nil
+        }
+
+        // today at h:m — parity with datetime.now().replace(hour, minute, ...)
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = sh
+        comps.minute = sm
+        comps.second = 0
+        guard let start = Calendar.current.date(from: comps) else { return nil }
+        comps.hour = eh
+        comps.minute = em
+        guard var end = Calendar.current.date(from: comps) else { return nil }
+
+        if end <= start {
+            end += 86400  // parity with `end += timedelta(days=1)`
+        }
+        return end.timeIntervalSince(start) / 60.0
+    }
+
     /// Mimics Python `int(str)`: trims whitespace and tolerates a leading "+".
     private static func parsePythonInt(_ s: String) -> Int? {
         var t = s.trimmingCharacters(in: .whitespaces)
