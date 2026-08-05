@@ -91,9 +91,9 @@ enum PresetFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: timeStart,
             secondLabel: "结束时间 (HH:MM):", secondDefault: timeEnd,
             outputInitial: dv(target?.output, fallback: "sub_\(channel.lowercased())"),
-            nameInitial: dv(target?.name, fallback: "字幕 \(channel) \(timeStart)"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: channel)),
             outputFormat: { "sub_\($0.lowercased())" },
-            nameFormat: { ch, ts in "字幕 \(ch) \(ts)" })
+            nameFormat: { ch, _ in presetNameDefault(action: .subtitle, channel: ch) })
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let ch = content.popup.titleOfSelectedItem ?? ""
@@ -155,44 +155,54 @@ enum PresetFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: startAt,
             secondLabel: "录制时长 (分钟):", secondDefault: duration,
             outputInitial: dv(target?.output, fallback: "radio_\(station.lowercased()).m4a"),
-            nameInitial: dv(target?.name, fallback: "广播 \(station) \(startAt)"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .radio, channel: station)),
             outputFormat: { "radio_\($0.lowercased()).m4a" },
-            nameFormat: { st, sa in "广播 \(st) \(sa)" },
+            nameFormat: { st, _ in presetNameDefault(action: .radio, channel: st) },
             checkboxLabel: "转换为视频",
             checkboxDefault: target?.toVideo ?? false)
     }
 
-    /// launcher.py:358-378: channel + 开始时间 + 时长 + output + name. All
-    /// defaults via `dv(field:fallback:)`.
+    /// launcher.py:489-516: channel + 开始时间 + 结束时间 + output + name.
+    /// All defaults via `dv(field:fallback:)`. The 结束时间 default is the
+    /// target's stored `end_time`, else computed from the stored start +
+    /// duration (launcher.py:490-491 `dv("end_time", self._end_time(...))`);
+    /// on confirm the duration is DERIVED from start/end
+    /// (launcher.py:506 `_duration_min`) and `end_time` is stored alongside
+    /// it (launcher.py:511-516) — a 0/negative/nil duration bails with no
+    /// side effects (launcher.py:509-510).
     private static func tverPresetFlow(title: String, target: Preset?) {
         let channel = dv(target?.channel, fallback: "TBS")
         let startAt = dv(target?.startAt, fallback: "21:00")
         let duration = dv(target?.duration, fallback: "60")
+        let endTime = dv(target?.endTime, fallback: LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration))
         let content = makePresetAlert(
             title: "\(title) — TVer",
             popupLabel: "频道:",
             options: CommandBuilder.channelOrder,
             popupDefault: channel,
             startLabel: "开始时间 (HH:MM):", startDefault: startAt,
-            secondLabel: "录制时长 (分钟):", secondDefault: duration,
+            secondLabel: "结束时间 (HH:MM):", secondDefault: endTime,
             outputInitial: dv(target?.output, fallback: "\(channel.lowercased()).mp4"),
-            nameInitial: dv(target?.name, fallback: "\(channel) \(startAt)"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: channel)),
             outputFormat: { "\($0.lowercased()).mp4" },
-            nameFormat: { ch, sa in "\(ch) \(sa)" })
+            nameFormat: { ch, _ in presetNameDefault(action: .tver, channel: ch) })
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let ch = content.popup.titleOfSelectedItem ?? ""
         let start = trimmed(content.startField.stringValue)
-        let durationValue = trimmed(content.secondField.stringValue)
+        let end = trimmed(content.secondField.stringValue)
         let output = trimmed(content.outputField.stringValue)
         let name = trimmed(content.nameField.stringValue)
-        guard !ch.isEmpty, !start.isEmpty, !durationValue.isEmpty,
+        guard !ch.isEmpty, !start.isEmpty, !end.isEmpty,
               !output.isEmpty, !name.isEmpty else { return }
+        guard let durationMin = LabelHelpers.durationMin(startAt: start, endTime: end),
+              durationMin > 0 else { return }
         commitPreset(Preset(
             name: name, action: .tver,
             channel: ch, station: nil,
             timeStart: nil, timeEnd: nil,
-            startAt: start, duration: durationValue, output: output), target: target)
+            startAt: start, duration: String(durationMin), output: output,
+            endTime: end), target: target)
     }
 
     /// launcher.py:359-385: `idx = next((i for i,p in enumerate(self.presets)
@@ -341,6 +351,19 @@ enum PresetFlows {
     /// `return target.get(field, fallback) if target else fallback`.
     private static func dv(_ value: String?, fallback: String) -> String {
         value ?? fallback
+    }
+
+    /// launcher.py:446/470/497 hardcoded preset-name defaults: the 收藏名称
+    /// fallback for a NEW preset is "字幕 <ch> 19:00" / "广播 <st> 21:00" /
+    /// "<ch> 21:00" — a FIXED time, independent of the dialog's start-time
+    /// field (unlike the pre-Gap-4 dynamic defaults). The radio caller
+    /// passes the station as `channel`.
+    static func presetNameDefault(action: PresetAction, channel: String) -> String {
+        switch action {
+        case .subtitle: return "字幕 \(channel) 19:00"
+        case .radio: return "广播 \(channel) 21:00"
+        case .tver: return "\(channel) 21:00"
+        }
     }
 
     /// Builds one preset-save alert: messageText = flow title, accessory =
