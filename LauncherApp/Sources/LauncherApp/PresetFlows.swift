@@ -91,9 +91,9 @@ enum PresetFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: timeStart,
             secondLabel: "结束时间 (HH:MM):", secondDefault: timeEnd,
             outputInitial: dv(target?.output, fallback: "sub_\(channel.lowercased())"),
-            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: channel)),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: channel, start: timeStart)),
             outputFormat: { "sub_\($0.lowercased())" },
-            nameFormat: { ch, _ in presetNameDefault(action: .subtitle, channel: ch) })
+            nameFormat: { ch, start in presetNameDefault(action: .subtitle, channel: ch, start: start) })
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let ch = content.popup.titleOfSelectedItem ?? ""
@@ -155,9 +155,9 @@ enum PresetFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: startAt,
             secondLabel: "录制时长 (分钟):", secondDefault: duration,
             outputInitial: dv(target?.output, fallback: "radio_\(station.lowercased()).m4a"),
-            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .radio, channel: station)),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .radio, channel: station, start: startAt)),
             outputFormat: { "radio_\($0.lowercased()).m4a" },
-            nameFormat: { st, _ in presetNameDefault(action: .radio, channel: st) },
+            nameFormat: { st, start in presetNameDefault(action: .radio, channel: st, start: start) },
             checkboxLabel: "转换为视频",
             checkboxDefault: target?.toVideo ?? false)
     }
@@ -183,9 +183,9 @@ enum PresetFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: startAt,
             secondLabel: "结束时间 (HH:MM):", secondDefault: endTime,
             outputInitial: dv(target?.output, fallback: "\(channel.lowercased()).mp4"),
-            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: channel)),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: channel, start: startAt)),
             outputFormat: { "\($0.lowercased()).mp4" },
-            nameFormat: { ch, _ in presetNameDefault(action: .tver, channel: ch) })
+            nameFormat: { ch, start in presetNameDefault(action: .tver, channel: ch, start: start) })
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let ch = content.popup.titleOfSelectedItem ?? ""
@@ -353,16 +353,16 @@ enum PresetFlows {
         value ?? fallback
     }
 
-    /// launcher.py:446/470/497 hardcoded preset-name defaults: the 收藏名称
-    /// fallback for a NEW preset is "字幕 <ch> 19:00" / "广播 <st> 21:00" /
-    /// "<ch> 21:00" — a FIXED time, independent of the dialog's start-time
-    /// field (unlike the pre-Gap-4 dynamic defaults). The radio caller
-    /// passes the station as `channel`.
-    static func presetNameDefault(action: PresetAction, channel: String) -> String {
+    /// launcher.py:446/470/497 preset-name defaults: the 收藏名称 fallback
+    /// for a NEW preset is "字幕 <ch> <start>" / "广播 <st> <start>" /
+    /// "<ch> <start>" — the start time FOLLOWS the form's start field (the
+    /// dv()'d value when the form opens, the live field value as the user
+    /// edits it). The radio caller passes the station as `channel`.
+    static func presetNameDefault(action: PresetAction, channel: String, start: String) -> String {
         switch action {
-        case .subtitle: return "字幕 \(channel) 19:00"
-        case .radio: return "广播 \(channel) 21:00"
-        case .tver: return "\(channel) 21:00"
+        case .subtitle: return "字幕 \(channel) \(start)"
+        case .radio: return "广播 \(channel) \(start)"
+        case .tver: return "\(channel) \(start)"
         }
     }
 

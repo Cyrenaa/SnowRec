@@ -41,9 +41,12 @@ if CommandLine.arguments.contains("--dump-helpers") {
     print("durationMin2=\(dm("23:30", "00:30"))")   // 60.0
     print("durationMin3=\(dm("xx", "22:00"))")      // nil
     print("durationMin4=\(dm("22:00", "21:00"))")   // 1380.0
-    print("presetNameSubtitle=\(PresetFlows.presetNameDefault(action: .subtitle, channel: "TBS"))")  // 字幕 TBS 19:00
-    print("presetNameRadio=\(PresetFlows.presetNameDefault(action: .radio, channel: "TBS"))")        // 广播 TBS 21:00
-    print("presetNameTver=\(PresetFlows.presetNameDefault(action: .tver, channel: "TBS"))")          // TBS 21:00
+    print("presetNameSubtitle=\(PresetFlows.presetNameDefault(action: .subtitle, channel: "TBS", start: "19:00"))")  // 字幕 TBS 19:00
+    print("presetNameRadio=\(PresetFlows.presetNameDefault(action: .radio, channel: "TBS", start: "21:00"))")        // 广播 TBS 21:00
+    print("presetNameTver=\(PresetFlows.presetNameDefault(action: .tver, channel: "TBS", start: "21:00"))")          // TBS 21:00
+    print("presetNameSubtitleEdited=\(PresetFlows.presetNameDefault(action: .subtitle, channel: "TBS", start: "20:00"))")  // 字幕 TBS 20:00
+    print("presetNameRadioEdited=\(PresetFlows.presetNameDefault(action: .radio, channel: "TBS", start: "22:00"))")        // 广播 TBS 22:00
+    print("presetNameTverEdited=\(PresetFlows.presetNameDefault(action: .tver, channel: "CX (富士)", start: "22:00"))")    // CX (富士) 22:00
     exit(0)
 }
 
