@@ -212,12 +212,14 @@ The app appears as a ⛄️ status item in the menu bar (no Dock icon). State pe
 
 | Item | Description |
 |------|-------------|
-| `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task from a single form dialog: channel/station is a drop-down, parameters are input boxes, and the radio-to-MP4 option is a 转换为视频 checkbox (equivalent to `--to-video`, needs a same-name image). Presets first ask for the type, then show the same form |
+| `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task from a single form dialog: channel/station is a drop-down, parameters are input boxes, and the radio-to-MP4 option is a 转换为视频 checkbox (equivalent to `--to-video`, needs a same-name image). The subtitle form also has a 历史字幕 checkbox (equivalent to `--history`, for scanning an already-past window), and the TVer form takes 开始时间 and 结束时间, computing the recording duration from the two. Presets first ask for the type, then show the same form |
 | `⭐ 收藏` | Presets: 新建收藏 / 管理收藏, plus clickable preset entries to run them. 修改 re-runs the full creation flow with the current values pre-filled, then overwrites the preset in place |
 | `🕐 最近` | Recent tasks with status; re-run a task or view its command/log |
 | `⏹ 停止全部` | Terminate all running tasks (shown only while tasks are active) |
 | `🔄 重启` | Restart the app; warns first when tasks are running (a relaunch kills leftover tasks via orphan recovery) |
 | `退出` | Quit |
+
+TVer presets store the 结束时间 value as `end_time` alongside the computed duration, so re-running a preset restores the same recording window.
 
 > **Deploy copy**: the deploy copy at `/Users/wyn/Documents/script/` (a separate git repo) is NOT auto-synced. After this repo switches its launcher to the Swift app, sync the deploy copy yourself.
 
