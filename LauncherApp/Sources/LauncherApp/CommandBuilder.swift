@@ -35,22 +35,29 @@ enum CommandBuilder {
     // MARK: subtitle (launcher.py:418-426)
 
     /// `page_url = CHANNELS.get(p["channel"], "")` — unknown channels yield an
-    /// EMPTY string element (launcher.py:419).
+    /// EMPTY string element (launcher.py:419). `history` appends `"--history"`
+    /// AFTER the `--output` pair (launcher.py:719-720 parity:
+    /// `if history: cmd.append("--history")`).
     static func subtitleCommand(
         repoRoot: String,
         channel: String,
         timeStart: String,
         timeEnd: String,
-        output: String
+        output: String,
+        history: Bool = false
     ) -> [String] {
         let pageURL = channels[channel] ?? ""
-        return [
+        var cmd = [
             "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/download_vtt.py",
             "--tver-page", pageURL,
             "--time-start", timeStart,
             "--time-end", timeEnd,
             "--output", output,
         ]
+        if history {
+            cmd.append("--history")
+        }
+        return cmd
     }
 
     // MARK: radio (launcher.py:430-436)
