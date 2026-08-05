@@ -219,7 +219,7 @@ The app appears as a ⛄️ status item in the menu bar (no Dock icon). State pe
 | `🔄 重启` | Restart the app; warns first when tasks are running (a relaunch kills leftover tasks via orphan recovery) |
 | `退出` | Quit |
 
-TVer presets store the 结束时间 value as `end_time` alongside the computed duration, so re-running a preset restores the same recording window.
+TVer presets store the 结束时间 value as `end_time` alongside the computed duration, so re-running a preset restores the same recording window. Editing a TVer preset re-derives the 结束时间 default from the stored start + duration (a custom stored `end_time` is no longer auto-shown, though it is still saved on confirm).
 
 > **Deploy copy**: the deploy copy at `/Users/wyn/Documents/script/` (a separate git repo) is NOT auto-synced. After this repo switches its launcher to the Swift app, sync the deploy copy yourself.
 

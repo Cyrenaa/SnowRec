@@ -47,6 +47,9 @@ if CommandLine.arguments.contains("--dump-helpers") {
     print("presetNameSubtitleEdited=\(PresetFlows.presetNameDefault(action: .subtitle, channel: "TBS", start: "20:00"))")  // 字幕 TBS 20:00
     print("presetNameRadioEdited=\(PresetFlows.presetNameDefault(action: .radio, channel: "TBS", start: "22:00"))")        // 广播 TBS 22:00
     print("presetNameTverEdited=\(PresetFlows.presetNameDefault(action: .tver, channel: "CX (富士)", start: "22:00"))")    // CX (富士) 22:00
+    print("presetTverEnd=\(LabelHelpers.endTimeLabel(startAt: "21:00", durationMin: "60"))")        // 22:00
+    print("presetTverEndEdited=\(LabelHelpers.endTimeLabel(startAt: "20:00", durationMin: "45"))")  // 20:45
+    print("presetTverEndBadDuration=\(LabelHelpers.endTimeLabel(startAt: "21:00", durationMin: "abc"))")  // ?  (I3 parity)
     exit(0)
 }
 

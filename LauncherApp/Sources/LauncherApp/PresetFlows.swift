@@ -163,18 +163,19 @@ enum PresetFlows {
     }
 
     /// launcher.py:489-516: channel + 开始时间 + 结束时间 + output + name.
-    /// All defaults via `dv(field:fallback:)`. The 结束时间 default is the
-    /// target's stored `end_time`, else computed from the stored start +
-    /// duration (launcher.py:490-491 `dv("end_time", self._end_time(...))`);
-    /// on confirm the duration is DERIVED from start/end
-    /// (launcher.py:506 `_duration_min`) and `end_time` is stored alongside
-    /// it (launcher.py:511-516) — a 0/negative/nil duration bails with no
-    /// side effects (launcher.py:509-510).
+    /// All defaults via `dv(field:fallback:)`. The 结束时间 default is
+    /// ALWAYS re-derived from the stored start + duration
+    /// (`LabelHelpers.endTimeLabel`) — the target's stored `end_time` is no
+    /// longer read as a default (dropped preference), so stale end_time on
+    /// edits can never surface. On confirm the duration is DERIVED from
+    /// start/end (launcher.py:506 `_duration_min`) and `end_time` is still
+    /// SAVED alongside it (launcher.py:511-516) — a 0/negative/nil duration
+    /// bails with no side effects (launcher.py:509-510).
     private static func tverPresetFlow(title: String, target: Preset?) {
         let channel = dv(target?.channel, fallback: "TBS")
         let startAt = dv(target?.startAt, fallback: "21:00")
         let duration = dv(target?.duration, fallback: "60")
-        let endTime = dv(target?.endTime, fallback: LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration))
+        let endTime = LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration)
         let content = makePresetAlert(
             title: "\(title) — TVer",
             popupLabel: "频道:",
