@@ -241,6 +241,7 @@ struct FlowTestResult: Codable {
     let entry: HistoryEntry?
     let stopped: Bool
     let status: String
+    let name: String
 }
 
 /// "HH:MM" now + `seconds` (for the radio scripted start, Metis S2: now+2min
@@ -294,11 +295,11 @@ if CommandLine.arguments.contains("--flow-test") {
     if cancel {
         // Scripted cancel: like dismissing the NSAlert (nil inputs) — no
         // history entry, no spawn, no log file.
-        print(json(FlowTestResult(flow: flowName, entry: nil, stopped: false, status: "cancelled")))
+        print(json(FlowTestResult(flow: flowName, entry: nil, stopped: false, status: "cancelled", name: "-")))
         exit(0)
     }
 
-    let task: Task
+    let task: Task?
     switch flowName {
     case "radio":
         task = DialogFlows.startRadio(
@@ -307,7 +308,7 @@ if CommandLine.arguments.contains("--flow-test") {
     case "tver":
         task = DialogFlows.startTver(
             delegate: delegate, channel: "TBS",
-            startAt: "21:00", duration: "30", output: "tbs.mp4")
+            startAt: "21:00", endTime: "22:00", output: "tbs.mp4")
     case "subtitle":
         task = DialogFlows.startSubtitle(
             delegate: delegate, channel: "CX (富士)",
@@ -315,6 +316,15 @@ if CommandLine.arguments.contains("--flow-test") {
     default:
         FileHandle.standardError.write(
             Data("--flow-test: unknown flow '\(flowName)'\n".utf8))
+        exit(1)
+    }
+
+    // startTver returns nil when the derived duration is invalid (nil/<=0,
+    // launcher.py:650-651 cancel parity) — a scripted tver flow with a bad
+    // start/end pair must fail loudly, not crash on the nil task.
+    guard let task else {
+        FileHandle.standardError.write(
+            Data("--flow-test: startTver returned nil (invalid duration)\n".utf8))
         exit(1)
     }
 
@@ -330,7 +340,7 @@ if CommandLine.arguments.contains("--flow-test") {
 
     let stopped = await TaskManager.stop(task, store: StateStore())
     let entry = DialogFlows.currentEntry(task, store: StateStore())
-    print(json(FlowTestResult(flow: flowName, entry: entry, stopped: stopped, status: task.status)))
+    print(json(FlowTestResult(flow: flowName, entry: entry, stopped: stopped, status: task.status, name: task.name)))
     exit(0)
 }
 

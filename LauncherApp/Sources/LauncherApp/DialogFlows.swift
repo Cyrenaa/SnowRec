@@ -6,7 +6,7 @@ import AppKit
 /// osascript → AppKit mapping (plan E4):
 /// - `osa_form` `("select", ...)`   → NSPopUpButton inside the alert's accessory NSGridView
 /// - `osa_form` `("text", ...)`     → NSTextField (same grid)
-/// - `osa_form` `("checkbox", ...)` → NSButton checkbox (radio 转换为视频)
+/// - `osa_form` `("checkbox", ...)` → NSButton checkbox (subtitle 历史字幕 / radio 转换为视频)
 /// - `osa_confirm` → the alert's 确认/取消 buttons
 ///
 /// Cancel semantics: osa_* return None on cancel and the flow returns with NO
@@ -33,7 +33,8 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
-            outputInitial: "sub_tbs")
+            outputInitial: "sub_tbs",
+            checkboxLabel: "历史字幕", checkboxDefault: false)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -43,8 +44,10 @@ enum DialogFlows {
         guard !channel.isEmpty, !timeStart.isEmpty, !timeEnd.isEmpty, !output.isEmpty else {
             return  // empty input == cancel (launcher.py: `if not x: return`)
         }
+        let history = content.checkbox?.state == .on
         startSubtitle(delegate: delegate, channel: channel,
-                      timeStart: timeStart, timeEnd: timeEnd, output: output)
+                      timeStart: timeStart, timeEnd: timeEnd, output: output,
+                      history: history)
     }
 
     /// launcher.py:564-589 `_new_radio`.
@@ -99,19 +102,20 @@ enum DialogFlows {
             options: CommandBuilder.channelOrder,
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
-            secondLabel: "录制时长 (分钟):", secondDefault: "60",
+            secondLabel: "结束时间 (HH:MM):", secondDefault: "22:00",
             outputInitial: "tbs.mp4")
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
         let startAt = trimmed(content.startField.stringValue)
-        let duration = trimmed(content.secondField.stringValue)
+        let endTime = trimmed(content.secondField.stringValue)
         let output = trimmed(content.outputField.stringValue)
-        guard !channel.isEmpty, !startAt.isEmpty, !duration.isEmpty, !output.isEmpty else {
-            return
+        guard !channel.isEmpty, !startAt.isEmpty, !endTime.isEmpty, !output.isEmpty,
+              CommandBuilder.channels[channel] != nil else {
+            return  // empty/unknown input == cancel (launcher.py:648 page_url check)
         }
         startTver(delegate: delegate, channel: channel,
-                  startAt: startAt, duration: duration, output: output)
+                  startAt: startAt, endTime: endTime, output: output)
     }
 
     // MARK: - Post-confirm pipeline (shared with --flow-test)
@@ -121,11 +125,13 @@ enum DialogFlows {
     @discardableResult
     static func startSubtitle(
         delegate: AppDelegate, channel: String,
-        timeStart: String, timeEnd: String, output: String
+        timeStart: String, timeEnd: String, output: String,
+        history: Bool = false
     ) -> Task {
         let cmd = CommandBuilder.subtitleCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
-            channel: channel, timeStart: timeStart, timeEnd: timeEnd, output: output)
+            channel: channel, timeStart: timeStart, timeEnd: timeEnd, output: output,
+            history: history)
         let name = "字幕 \(channel) \(timeStart)-\(timeEnd)"
         return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
     }
@@ -148,19 +154,26 @@ enum DialogFlows {
             historyLabel: "广播 \(station) \(startAt)", cmd: cmd)
     }
 
-    /// launcher.py:510-520 confirm path.
+    /// launcher.py:510-520 confirm path. The duration is DERIVED from the
+    /// start/end times (launcher.py:646 `_duration_min`) — an invalid or
+    /// non-positive result cancels the flow (launcher.py:650-651). Returns
+    /// nil in that case so callers (the alert flow and --flow-test) can stop.
     @discardableResult
     static func startTver(
         delegate: AppDelegate, channel: String,
-        startAt: String, duration: String, output: String
-    ) -> Task {
+        startAt: String, endTime: String, output: String
+    ) -> Task? {
+        guard let duration = LabelHelpers.durationMin(startAt: startAt, endTime: endTime),
+              duration > 0 else {
+            return nil
+        }
         let cmd = CommandBuilder.tverCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
-            channel: channel, startAt: startAt, duration: duration, output: output)
-        let end = LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration)
+            channel: channel, startAt: startAt, duration: String(duration), output: output)
+        let name = "TVer \(channel) \(startAt)-\(endTime)"  // ENTERED endTime (launcher.py:660)
         return startFlow(
             delegate: delegate,
-            name: "TVer \(channel) \(startAt)-\(end)",
+            name: name,
             historyLabel: "TVer \(channel) \(startAt)", cmd: cmd)
     }
 
@@ -294,9 +307,9 @@ enum DialogFlows {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Holds a flow alert's controls. `checkbox` is nil for flows without an
-    /// optional checkbox row (subtitle/tver); the radio flow reads
-    /// `checkbox?.state == .on` for 转换为视频.
+    /// Holds a flow alert's controls. `checkbox` is nil only for the tver
+    /// flow (no checkbox row); the radio flow reads `checkbox?.state == .on`
+    /// for 转换为视频, the subtitle flow for 历史字幕.
     final class TaskAlertContent {
         let alert: NSAlert
         let popup: NSPopUpButton
