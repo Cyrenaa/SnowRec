@@ -19,9 +19,12 @@ APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 DIST_DIR="$APP_DIR/dist"
-APP_BUNDLE="$DIST_DIR/LauncherApp.app"
+APP_BUNDLE="$DIST_DIR/SnowRec.app"
 CONTENTS_DIR="$APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+
+# App icon source (512x512 PNG). Override via ICON_PNG=/path/to.png.
+ICON_PNG="${ICON_PNG:-/Users/wyn/Documents/ic.png}"
 
 echo "[pkg] repo root: $REPO_ROOT"
 echo "[pkg] building release binary..."
@@ -37,6 +40,7 @@ fi
 
 # 2. Assemble the .app bundle
 rm -rf "$APP_BUNDLE"
+rm -rf "$DIST_DIR/LauncherApp.app"   # legacy bundle name from before the rename
 mkdir -p "$MACOS_DIR"
 cp "$BIN_SRC" "$MACOS_DIR/LauncherApp"
 
@@ -51,7 +55,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundleIdentifier</key>
     <string>com.snowrec.launcher</string>
     <key>CFBundleName</key>
-    <string>LauncherApp</string>
+    <string>SnowRec</string>
+    <key>CFBundleIconFile</key>
+    <string>SnowRec</string>
     <key>CFBundleExecutable</key>
     <string>LauncherApp</string>
     <key>CFBundlePackageType</key>
@@ -68,7 +74,29 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# 3. Ad-hoc codesign
+# 3. App icon: downscale ICON_PNG into an .icns (skipped gracefully when missing)
+if [[ -f "$ICON_PNG" ]]; then
+    RESOURCES_DIR="$CONTENTS_DIR/Resources"
+    mkdir -p "$RESOURCES_DIR"
+    ICONSET_DIR="$DIST_DIR/icon.iconset"
+    rm -rf "$ICONSET_DIR"
+    mkdir -p "$ICONSET_DIR"
+    for spec in "icon_16x16.png 16" "icon_16x16@2x.png 32" "icon_32x32.png 32" \
+                "icon_32x32@2x.png 64" "icon_128x128.png 128" "icon_128x128@2x.png 256" \
+                "icon_256x256.png 256" "icon_256x256@2x.png 512" "icon_512x512.png 512" \
+                "icon_512x512@2x.png 1024"; do
+        name="${spec% *}"
+        size="${spec#* }"
+        sips -z "$size" "$size" "$ICON_PNG" --out "$ICONSET_DIR/$name" >/dev/null
+    done
+    iconutil -c icns "$ICONSET_DIR" -o "$RESOURCES_DIR/SnowRec.icns"
+    rm -rf "$ICONSET_DIR"
+    echo "[pkg] app icon: $RESOURCES_DIR/SnowRec.icns (from $ICON_PNG)"
+else
+    echo "[pkg] WARN: icon source $ICON_PNG not found; app icon skipped" >&2
+fi
+
+# 4. Ad-hoc codesign
 codesign --force --deep --sign - "$APP_BUNDLE"
 
 echo "[pkg] done: $APP_BUNDLE"
