@@ -167,6 +167,7 @@ enum DialogFlows {
               duration > 0 else {
             return nil
         }
+        guard AlertPresenter.confirmLongDuration(minutes: duration) else { return nil }
         let cmd = CommandBuilder.tverCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
             channel: channel, startAt: startAt, duration: String(duration), output: output)

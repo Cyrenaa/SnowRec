@@ -50,6 +50,9 @@ if CommandLine.arguments.contains("--dump-helpers") {
     print("presetTverEnd=\(LabelHelpers.endTimeLabel(startAt: "21:00", durationMin: "60"))")        // 22:00
     print("presetTverEndEdited=\(LabelHelpers.endTimeLabel(startAt: "20:00", durationMin: "45"))")  // 20:45
     print("presetTverEndBadDuration=\(LabelHelpers.endTimeLabel(startAt: "21:00", durationMin: "abc"))")  // ?  (I3 parity)
+    print("longDuration1439=\(AlertPresenter.isLongDuration(1439))")  // false
+    print("longDuration1440=\(AlertPresenter.isLongDuration(1440))")  // false
+    print("longDuration1441=\(AlertPresenter.isLongDuration(1441))")  // true
     exit(0)
 }
 

@@ -27,4 +27,19 @@ enum AlertPresenter {
         NSApp.activate(ignoringOtherApps: true)
         return alert.runModal()
     }
+
+    /// I6: durations over 24h (1440 min) prompt 确认/取消; cancel returns false.
+    /// Durations <= 1440 pass through with no alert. Int() truncates the Double
+    /// like Python int(duration).
+    static func isLongDuration(_ minutes: Double) -> Bool { minutes > 1440 }
+
+    static func confirmLongDuration(minutes: Double) -> Bool {
+        guard isLongDuration(minutes) else { return true }
+        let alert = NSAlert()
+        alert.messageText = "时长警告"
+        alert.informativeText = "录制时长 \(Int(minutes)) 分钟超过 24 小时，确定继续？"
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        return presentModal(alert) == .alertFirstButtonReturn
+    }
 }

@@ -198,6 +198,7 @@ enum PresetFlows {
               !output.isEmpty, !name.isEmpty else { return }
         guard let durationMin = LabelHelpers.durationMin(startAt: start, endTime: end),
               durationMin > 0 else { return }
+        guard AlertPresenter.confirmLongDuration(minutes: durationMin) else { return }
         commitPreset(Preset(
             name: name, action: .tver,
             channel: ch, station: nil,
@@ -336,6 +337,16 @@ enum PresetFlows {
                 repoRoot: root, channel: preset.channel ?? "",
                 startAt: preset.startAt ?? "", duration: preset.duration ?? "",
                 output: preset.output ?? "")
+            // I6/I3 parity with launcher.py _run_preset: non-numeric stored
+            // duration -> silent skip; >24h -> confirm, cancel = skip. The
+            // returned Task is built but never appended/spawned (skip marker).
+            if let dur = preset.duration.flatMap(Double.init) {
+                guard AlertPresenter.confirmLongDuration(minutes: dur) else {
+                    return Task(name: preset.name, cmd: cmd)
+                }
+            } else {
+                return Task(name: preset.name, cmd: cmd)
+            }
         }
         let task = Task(name: preset.name, cmd: cmd)
         delegate.tasks.append(task)
