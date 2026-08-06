@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
 
     /// Running/scheduled tasks. Empty until todos 18+ populate it; the menu
-    /// only gains the 任务 section and ⏹ 停止全部 once active tasks exist.
+    /// only gains the 任务 section and 停止全部 once active tasks exist.
     /// Internal (not private) so the --menu-refresh-test QA flag can inject
     /// tasks without a GUI.
     var tasks: [Task] = []
@@ -95,8 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Attaches target/action to the three new-task menu items (launcher.py:
-    /// 266-268 callbacks), the ⭐ 收藏 submenu items (launcher.py:272-281),
-    /// the 🕐 最近 submenu items (launcher.py:284-297) and the task items
+    /// 266-268 callbacks), the flat preset entries (launcher.py:272-281),
+    /// the 最近 submenu items (launcher.py:284-297) and the task items
     /// (launcher.py:261 callback). Called on EVERY rebuild because each
     /// rebuild builds a brand-new menu object — this is what survives the
     /// 5s refresh timer. Task/history/preset items are identified by their
@@ -104,33 +104,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func attachMenuActions(to menu: NSMenu, state: StateFile) {
         for item in menu.items {
             switch item.title {
-            case "📝 下载字幕":
+            case "下载字幕":
                 item.target = self
                 item.action = #selector(newSubtitleAction)
                 item.isEnabled = true
-            case "📻 录制广播":
+            case "录制广播":
                 item.target = self
                 item.action = #selector(newRadioAction)
                 item.isEnabled = true
-            case "📺 录制 TVer":
+            case "录制 TVer":
                 item.target = self
                 item.action = #selector(newTverAction)
                 item.isEnabled = true
-            case "⭐ 收藏":
-                if let submenu = item.submenu {
-                    attachPresetActions(to: submenu, state: state)
-                }
-            case "🕐 最近":
+            case "新建收藏...":
+                item.target = self
+                item.action = #selector(savePresetAction)
+                item.isEnabled = true
+            case "最近":
                 if let submenu = item.submenu {
                     attachHistoryActions(to: submenu)
                 }
-            case "⏹ 停止全部":
+            case "停止全部":
                 // launcher.py:301 callback; only present when active tasks
                 // exist (MenuBuilder is already conditional).
                 item.target = self
                 item.action = #selector(killAllAction)
                 item.isEnabled = true
-            case "🔄 重启":
+            case "重启":
                 // launcher.py:303 callback = _restart_app.
                 item.target = self
                 item.action = #selector(restartAction)
@@ -147,51 +147,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     item.target = self
                     item.action = #selector(taskInfoAction(_:))
                     item.isEnabled = true
+                } else if let preset = state.presets.first(where: { $0.name == item.title }) {
+                    // Flat preset row: matched by name against the freshly
+                    // loaded state (launcher.py:411 parity); a preset renamed
+                    // away simply stops matching (stays disabled until the
+                    // next rebuild). Clicking the row runs the preset; its
+                    // manage submenu (修改收藏/删除收藏) is attached below.
+                    item.representedObject = preset
+                    item.target = self
+                    item.action = #selector(runPresetAction(_:))
+                    item.isEnabled = true
+                    if let submenu = item.submenu {
+                        attachPresetManageActions(to: submenu, preset: preset)
+                    }
                 }
             }
         }
     }
 
-    /// Wires the ⭐ 收藏 submenu: preset items → runPreset, ➕ 新建收藏... →
-    /// savePreset, ✏️ 管理收藏... → managePresets (launcher.py:272-281
-    /// callbacks). Preset items carry the Preset as `representedObject`,
-    /// matched against the freshly-loaded state by name (launcher.py:411
-    /// matches the menu title against _DATA at click time).
-    private func attachPresetActions(to submenu: NSMenu, state: StateFile) {
+    /// Wires a preset row's manage submenu: 修改 → edit flow, 删除 →
+    /// confirm-and-remove. Both items carry the preset as representedObject.
+    private func attachPresetManageActions(to submenu: NSMenu, preset: Preset) {
         for item in submenu.items {
             switch item.title {
-            case "  ➕ 新建收藏...":
-                item.target = self
-                item.action = #selector(savePresetAction)
-                item.isEnabled = true
-            case "  ✏️ 管理收藏...":
-                item.target = self
-                item.action = #selector(managePresetsAction)
-                item.isEnabled = true
-            default:
-                // Preset item: MenuBuilder prefixes names with two spaces;
-                // a preset renamed away simply stops matching (stays
-                // disabled until the next rebuild).
-                let name = item.title.trimmingCharacters(in: .whitespaces)
-                guard let preset = state.presets.first(where: { $0.name == name }) else {
-                    continue
-                }
+            case "  修改":
                 item.representedObject = preset
                 item.target = self
-                item.action = #selector(runPresetAction(_:))
+                item.action = #selector(editPresetAction(_:))
                 item.isEnabled = true
+            case "  删除":
+                item.representedObject = preset
+                item.target = self
+                item.action = #selector(deletePresetAction(_:))
+                item.isEnabled = true
+            default:
+                break
             }
         }
     }
 
-    /// Wires the 🕐 最近 submenu: history entries → rerunHistory (the entry
+    /// Wires the 最近 submenu: history entries → rerunHistory (the entry
     /// comes from representedObject — its title carries a " [status]" tag
     /// that must NOT be parsed, launcher.py:458 strips it in Python),
-    /// ❌ 清除全部 → clearHistory (launcher.py:292 callback).
+    /// 清除全部 → clearHistory (launcher.py:292 callback).
     private func attachHistoryActions(to submenu: NSMenu) {
         for item in submenu.items {
             switch item.title {
-            case "  ❌ 清除全部":
+            case "  清除全部":
                 item.target = self
                 item.action = #selector(clearHistoryAction)
                 item.isEnabled = true
@@ -228,8 +230,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PresetFlows.savePreset()
     }
 
-    @objc private func managePresetsAction() {
-        PresetFlows.managePresets()
+    @objc private func editPresetAction(_ sender: NSMenuItem) {
+        guard let preset = sender.representedObject as? Preset else { return }
+        PresetFlows.editPreset(preset)
+    }
+
+    @objc private func deletePresetAction(_ sender: NSMenuItem) {
+        guard let preset = sender.representedObject as? Preset else { return }
+        PresetFlows.deletePreset(preset)
     }
 
     @objc private func runPresetAction(_ sender: NSMenuItem) {

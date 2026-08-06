@@ -38,21 +38,26 @@ enum MenuBuilder {
         }
 
         // 下载字幕 / 录制广播 / 录制 TVer (launcher.py:266-268).
-        for title in ["📝 下载字幕", "📻 录制广播", "📺 录制 TVer"] {
+        for title in ["下载字幕", "录制广播", "录制 TVer"] {
             menu.addItem(disabledItem(title))
         }
         menu.addItem(.separator())
 
-        // ⭐ 收藏 — parent item with submenu (launcher.py:272-281).
-        let presetsMenu = NSMenu()
+        // 收藏 — preset entries listed FLAT on the top level (user's
+        // custom names keep their emoji; the section header mirrors the
+        // "── 任务 ──" style). Each row carries a manage submenu
+        // (修改收藏/删除收藏); clicking the row itself runs the preset.
+        menu.addItem(disabledItem("── 收藏 ──"))
         for preset in state.presets {
-            presetsMenu.addItem(disabledItem("  \(preset.name)"))
+            let manageMenu = NSMenu()
+            manageMenu.addItem(disabledItem("  修改"))
+            manageMenu.addItem(disabledItem("  删除"))
+            menu.addItem(parentItem(preset.name, submenu: manageMenu))
         }
-        presetsMenu.addItem(disabledItem("  ➕ 新建收藏..."))
-        presetsMenu.addItem(disabledItem("  ✏️ 管理收藏..."))
-        menu.addItem(parentItem("⭐ 收藏", submenu: presetsMenu))
+        menu.addItem(disabledItem("新建收藏..."))
+        menu.addItem(.separator())
 
-        // 🕐 最近 — parent item with submenu (launcher.py:284-297).
+        // 最近 — parent item with submenu (launcher.py:284-297).
         // Status tag ONLY when the status is non-empty (launcher.py:287).
         // Each entry item carries its HistoryEntry as representedObject
         // (todo 20: never parse the display title — it has the tag).
@@ -66,17 +71,17 @@ enum MenuBuilder {
         if historyMenu.items.isEmpty {
             historyMenu.addItem(disabledItem("  (空)"))
         } else {
-            historyMenu.addItem(disabledItem("  ❌ 清除全部"))
+            historyMenu.addItem(disabledItem("  清除全部"))
         }
-        menu.addItem(parentItem("🕐 最近", submenu: historyMenu))
+        menu.addItem(parentItem("最近", submenu: historyMenu))
 
         // Stop-all + restart + quit (launcher.py:299-304).
         menu.addItem(.separator())
         if !active.isEmpty {
-            menu.addItem(disabledItem("⏹ 停止全部"))
+            menu.addItem(disabledItem("停止全部"))
         }
         menu.addItem(.separator())
-        menu.addItem(disabledItem("🔄 重启"))
+        menu.addItem(disabledItem("重启"))
         menu.addItem(disabledItem("退出"))
 
         return menu
