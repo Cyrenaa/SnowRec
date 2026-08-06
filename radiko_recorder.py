@@ -14,6 +14,8 @@ import signal
 import subprocess
 import sys
 import time
+import socket
+import threading
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -21,6 +23,13 @@ from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
+
+# Global fallback: any socket operation (including TLS handshakes through a
+# proxy) must time out instead of hanging the process forever.
+socket.setdefaulttimeout(20)
+# Flush prints immediately when stdout is redirected to a file (block
+# buffering would hide progress in the launcher log until the buffer fills).
+sys.stdout.reconfigure(line_buffering=True)
 
 HEADERS_BASE = {
     "User-Agent": (
@@ -320,6 +329,24 @@ def main():
                         help="延迟到指定时间开始录制 (今日当地时间)")
     args = parser.parse_args()
 
+    # Register handlers BEFORE the --start-at wait: during the wait the
+    # process must be able to stop gracefully (a late registration left
+    # SIGTERM on its default kill behavior, marking tasks 失败 with rc=143).
+    running = [True]
+    recorder = None
+    stop_event = threading.Event()
+
+    def sig_handler(signum, frame):
+        sig_name = signal.Signals(signum).name
+        print(f"\n[{timestamp()}] 收到 {sig_name}，停止中...")
+        running[0] = False
+        stop_event.set()
+        if recorder is not None:
+            recorder.running = False
+
+    signal.signal(signal.SIGINT, sig_handler)
+    signal.signal(signal.SIGTERM, sig_handler)
+
     if args.start_at:
         parts = args.start_at.split(":")
         if len(parts) not in (2, 3):
@@ -339,9 +366,9 @@ def main():
         print(f"[{timestamp()}] 将在 {target.strftime('%Y-%m-%d %H:%M:%S')} 开始录制 "
               f"(等待 {wait_secs / 3600:.1f} 小时)")
         print(f"[{timestamp()}] 等待中，按 Ctrl+C 取消...")
-        try:
-            time.sleep(wait_secs)
-        except KeyboardInterrupt:
+        # Event.wait is interruptible by the signal handler (time.sleep would
+        # restart from scratch on a signal, PEP 475, and never wake up).
+        if stop_event.wait(wait_secs):
             print(f"\n[{timestamp()}] 已取消")
             return
 
@@ -354,17 +381,6 @@ def main():
         to_video=args.to_video,
         image_dir=args.image_dir,
     )
-
-    running = [True]
-
-    def sig_handler(signum, frame):
-        sig_name = signal.Signals(signum).name
-        print(f"\n[{timestamp()}] 收到 {sig_name}，停止中...")
-        running[0] = False
-        recorder.running = False
-
-    signal.signal(signal.SIGINT, sig_handler)
-    signal.signal(signal.SIGTERM, sig_handler)
 
     print(f"[{timestamp()}] 开始录制 {args.station}, {args.duration} 分钟 → {args.output}")
     recorder.run()
