@@ -247,6 +247,7 @@ enum DialogFlows {
         let alert = NSAlert()
         alert.messageText = title
         alert.alertStyle = .informational
+        alert.icon = snowflakeIcon()
         alert.addButton(withTitle: "确认")
         alert.addButton(withTitle: "取消")
         alert.buttons[1].keyEquivalent = "\u{1b}"
@@ -302,6 +303,21 @@ enum DialogFlows {
         let field = NSTextField(labelWithString: text)
         field.alignment = .right
         return field
+    }
+
+    /// Renders the ❄️ emoji into an NSImage for the task-alert icon
+    /// (matches the status item's emoji title). Internal so PresetFlows
+    /// reuses it for the preset dialogs.
+    static func snowflakeIcon() -> NSImage {
+        let size = NSSize(width: 64, height: 64)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 48),
+        ]
+        ("❄️" as NSString).draw(at: .zero, withAttributes: attrs)
+        image.unlockFocus()
+        return image
     }
 
     private static func trimmed(_ text: String) -> String {

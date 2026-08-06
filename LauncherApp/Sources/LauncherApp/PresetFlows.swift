@@ -2,9 +2,9 @@ import AppKit
 
 /// Preset (收藏) management flows, mirroring launcher.py:309-454:
 /// `presetFlow` (新建收藏/修改收藏: type chooser + per-type field alerts with
-/// dv() prefilled defaults), `managePresets` (管理收藏: modify/delete with
-/// confirmation), and `runPreset` (运行收藏: command build → Task → history →
-/// spawn).
+/// dv() prefilled defaults), `editPreset`/`deletePreset` (收藏条目管理:
+/// modify/delete directly on a preset row's manage submenu), and `runPreset`
+/// (运行收藏: command build → Task → history → spawn).
 ///
 /// Same osascript → AppKit mapping as DialogFlows (todo 18):
 /// - `osa_choose`  → NSPopUpButton inside the alert's accessory NSGridView
@@ -27,122 +27,61 @@ enum PresetFlows {
 
     /// launcher.py:309-385 `_preset_flow(target)`: title = 新建收藏 (nil) /
     /// 修改收藏 (non-nil); type chooser (下载字幕/录制广播/录制 TVer) defaults
-    /// to the target's action when editing; then the type-specific field
-    /// alert. Every field default comes from `dv(field:fallback:)` — the
-    /// target's stored value when editing, the launcher.py fallback for a
-    /// new preset. Persists via StateStore (launcher.py:384 `_save_data()`).
+    /// Single-dialog preset flow: the type chooser and the per-type field
+    /// form are ONE alert — the field section swaps live as the type
+    /// changes. Confirm reads the fields for the selected type and persists
+    /// via StateStore (launcher.py:384 `_save_data()`).
     static func presetFlow(target: Preset?) {
         let title = target == nil ? "新建收藏" : "修改收藏"
+        let content = makePresetFormAlert(title: title, target: target)
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
+        guard let type = content.typePopup.titleOfSelectedItem,
+              let fields = content.fields[type] else { return }
 
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = "选择类型:"
-        alert.addButton(withTitle: "确认")
-        alert.addButton(withTitle: "取消")
-        alert.buttons[1].keyEquivalent = "\u{1b}"
-
-        let popup = NSPopUpButton()
-        popup.addItems(withTitles: ["下载字幕", "录制广播", "录制 TVer"])
-        // launcher.py asks the type chooser with dv()-prefilled defaults; the
-        // Swift analog defaults the chooser to the target's action when
-        // editing (a new preset defaults to the first option, 下载字幕).
-        let defaultType: String
-        switch target?.action {
-        case .subtitle: defaultType = "下载字幕"
-        case .radio: defaultType = "录制广播"
-        case .tver: defaultType = "录制 TVer"
-        case .none: defaultType = "下载字幕"
-        }
-        let defaultIndex = popup.indexOfItem(withTitle: defaultType)
-        if defaultIndex >= 0 {
-            popup.selectItem(at: defaultIndex)
-        }
-        let grid = NSGridView(views: [[label("类型:"), popup]])
-        grid.rowSpacing = 8
-        grid.columnSpacing = 12
-        grid.column(at: 1).xPlacement = .fill
-        grid.column(at: 1).width = 200
-        let fitting = grid.fittingSize
-        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
-        alert.accessoryView = grid
-
-        guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
-        guard let type = popup.titleOfSelectedItem else { return }
+        let popupValue = fields.popup.titleOfSelectedItem ?? ""
+        let start = trimmed(fields.startField.stringValue)
+        let second = trimmed(fields.secondField.stringValue)
+        let output = trimmed(fields.outputField.stringValue)
+        let name = trimmed(fields.nameField.stringValue)
 
         switch type {
-        case "下载字幕": subtitlePresetFlow(title: title, target: target)
-        case "录制广播": radioPresetFlow(target: target)
-        default: tverPresetFlow(title: title, target: target)
+        case "下载字幕":
+            guard !popupValue.isEmpty, !start.isEmpty, !second.isEmpty,
+                  !output.isEmpty, !name.isEmpty else { return }
+            commitPreset(Preset(
+                name: name, action: .subtitle,
+                channel: popupValue, station: nil,
+                timeStart: start, timeEnd: second,
+                startAt: nil, duration: nil, output: output), target: target)
+        case "录制广播":
+            guard !popupValue.isEmpty, !start.isEmpty, !second.isEmpty,
+                  !output.isEmpty, !name.isEmpty else { return }
+            let toVideo = fields.checkbox?.state == .on
+            commitPreset(Preset(
+                name: name, action: .radio,
+                channel: nil, station: popupValue,
+                timeStart: nil, timeEnd: nil,
+                startAt: start, duration: second, output: output,
+                toVideo: toVideo ? true : nil), target: target)
+        default: // 录制 TVer
+            guard !popupValue.isEmpty, !start.isEmpty, !second.isEmpty,
+                  !output.isEmpty, !name.isEmpty else { return }
+            guard let durationMin = LabelHelpers.durationMin(startAt: start, endTime: second),
+                  durationMin > 0 else { return }
+            guard AlertPresenter.confirmLongDuration(minutes: durationMin) else { return }
+            commitPreset(Preset(
+                name: name, action: .tver,
+                channel: popupValue, station: nil,
+                timeStart: nil, timeEnd: nil,
+                startAt: start, duration: String(durationMin), output: output,
+                endTime: second), target: target)
         }
-    }
-
-    /// launcher.py:314-334: channel + 开始/结束时间 + output + name. All
-    /// defaults via `dv(field:fallback:)`. Preset JSON keys are snake_case
-    /// via Preset's CodingKeys.
-    private static func subtitlePresetFlow(title: String, target: Preset?) {
-        let channel = dv(target?.channel, fallback: "TBS")
-        let timeStart = dv(target?.timeStart, fallback: "19:00")
-        let timeEnd = dv(target?.timeEnd, fallback: "20:00")
-        let content = makePresetAlert(
-            title: "\(title) — 字幕",
-            popupLabel: "频道:",
-            options: CommandBuilder.channelOrder,
-            popupDefault: channel,
-            startLabel: "开始时间 (HH:MM):", startDefault: timeStart,
-            secondLabel: "结束时间 (HH:MM):", secondDefault: timeEnd,
-            outputInitial: dv(target?.output, fallback: "sub_\(channel.lowercased())"),
-            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: channel, start: timeStart)),
-            outputFormat: { "sub_\($0.lowercased())" },
-            nameFormat: { ch, start in presetNameDefault(action: .subtitle, channel: ch, start: start) })
-        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
-
-        let ch = content.popup.titleOfSelectedItem ?? ""
-        let start = trimmed(content.startField.stringValue)
-        let end = trimmed(content.secondField.stringValue)
-        let output = trimmed(content.outputField.stringValue)
-        let name = trimmed(content.nameField.stringValue)
-        guard !ch.isEmpty, !start.isEmpty, !end.isEmpty,
-              !output.isEmpty, !name.isEmpty else { return }
-        commitPreset(Preset(
-            name: name, action: .subtitle,
-            channel: ch, station: nil,
-            timeStart: start, timeEnd: end,
-            startAt: nil, duration: nil, output: output), target: target)
-    }
-
-    /// launcher.py:336-357: station + 开始时间 + 时长 + output + name, plus
-    /// the 转换为视频 checkbox INSIDE the form (launcher.py's osa_form radio
-    /// preset field order: ..., 输出文件名, 转换为视频 checkbox, 收藏名称) —
-    /// replacing the separate confirm alert (launcher.py:352-354 previously
-    /// asked `osa_confirm("录制完成后转换为视频？")` after the name dialog).
-    /// Unlike the other dialogs, unchecking does NOT bail the flow: a false
-    /// answer is stored as nil so `to_video` is omitted from JSON (default →
-    /// key omitted); a true answer is stored as true.
-    private static func radioPresetFlow(target: Preset?) {
-        let content = radioPresetAlert(target: target)
-        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
-
-        let st = content.popup.titleOfSelectedItem ?? ""
-        let start = trimmed(content.startField.stringValue)
-        let durationValue = trimmed(content.secondField.stringValue)
-        let output = trimmed(content.outputField.stringValue)
-        let name = trimmed(content.nameField.stringValue)
-        guard !st.isEmpty, !start.isEmpty, !durationValue.isEmpty,
-              !output.isEmpty, !name.isEmpty else { return }
-
-        let toVideo = content.checkbox?.state == .on
-        commitPreset(Preset(
-            name: name, action: .radio,
-            channel: nil, station: st,
-            timeStart: nil, timeEnd: nil,
-            startAt: start, duration: durationValue, output: output,
-            toVideo: toVideo ? true : nil), target: target)
     }
 
     /// QA hook (probe): builds the radio preset alert WITHOUT running a
-    /// modal — the exact construction `radioPresetFlow` presents, with
-    /// dv()-prefilled defaults. The 转换为视频 checkbox defaults OFF for a
-    /// new preset and ON for an edit target with toVideo == true.
+    /// modal (kept for --alert-probe-test; the live flow now uses the
+    /// single-dialog makePresetFormAlert). The 转换为视频 checkbox defaults
+    /// OFF for a new preset and ON for an edit target with toVideo == true.
     static func radioPresetAlert(target: Preset? = nil) -> PresetAlertContent {
         let station = dv(target?.station, fallback: "TBS")
         let startAt = dv(target?.startAt, fallback: "21:00")
@@ -162,57 +101,12 @@ enum PresetFlows {
             checkboxDefault: target?.toVideo ?? false)
     }
 
-    /// launcher.py:489-516: channel + 开始时间 + 结束时间 + output + name.
-    /// All defaults via `dv(field:fallback:)`. The 结束时间 default is
-    /// ALWAYS re-derived from the stored start + duration
-    /// (`LabelHelpers.endTimeLabel`) — the target's stored `end_time` is no
-    /// longer read as a default (dropped preference), so stale end_time on
-    /// edits can never surface. On confirm the duration is DERIVED from
-    /// start/end (launcher.py:506 `_duration_min`) and `end_time` is still
-    /// SAVED alongside it (launcher.py:511-516) — a 0/negative/nil duration
-    /// bails with no side effects (launcher.py:509-510).
-    private static func tverPresetFlow(title: String, target: Preset?) {
-        let channel = dv(target?.channel, fallback: "TBS")
-        let startAt = dv(target?.startAt, fallback: "21:00")
-        let duration = dv(target?.duration, fallback: "60")
-        let endTime = LabelHelpers.endTimeLabel(startAt: startAt, durationMin: duration)
-        let content = makePresetAlert(
-            title: "\(title) — TVer",
-            popupLabel: "频道:",
-            options: CommandBuilder.channelOrder,
-            popupDefault: channel,
-            startLabel: "开始时间 (HH:MM):", startDefault: startAt,
-            secondLabel: "结束时间 (HH:MM):", secondDefault: endTime,
-            outputInitial: dv(target?.output, fallback: "\(channel.lowercased()).mp4"),
-            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: channel, start: startAt)),
-            outputFormat: { "\($0.lowercased()).mp4" },
-            nameFormat: { ch, start in presetNameDefault(action: .tver, channel: ch, start: start) })
-        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
-
-        let ch = content.popup.titleOfSelectedItem ?? ""
-        let start = trimmed(content.startField.stringValue)
-        let end = trimmed(content.secondField.stringValue)
-        let output = trimmed(content.outputField.stringValue)
-        let name = trimmed(content.nameField.stringValue)
-        guard !ch.isEmpty, !start.isEmpty, !end.isEmpty,
-              !output.isEmpty, !name.isEmpty else { return }
-        guard let durationMin = LabelHelpers.durationMin(startAt: start, endTime: end),
-              durationMin > 0 else { return }
-        guard AlertPresenter.confirmLongDuration(minutes: durationMin) else { return }
-        commitPreset(Preset(
-            name: name, action: .tver,
-            channel: ch, station: nil,
-            timeStart: nil, timeEnd: nil,
-            startAt: start, duration: String(durationMin), output: output,
-            endTime: end), target: target)
-    }
-
     /// launcher.py:359-385: `idx = next((i for i,p in enumerate(self.presets)
     /// if p is target), None)` → overwrite at idx IN PLACE, else append; then
     /// `_save_data()`. Swift Preset is a struct (no `p is target` object
-    /// identity), so the edit target is matched by NAME — managePresets also
-    /// finds its target by name, and runPreset menu matching uses trimmed
-    /// names (AppDelegate against freshly-loaded state).
+    /// identity), so the edit target is matched by NAME — editPreset and the
+    /// runPreset menu matching use trimmed names (AppDelegate against
+    /// freshly-loaded state).
     static func commitPreset(_ preset: Preset, target: Preset?) {
         let store = StateStore()
         var state = store.load()
@@ -225,83 +119,28 @@ enum PresetFlows {
         store.save(state)
     }
 
-    // MARK: - 管理收藏 (launcher.py:382-408)
+    // MARK: - 收藏条目管理 (replaces launcher.py:382-408 choose-then-act)
 
-    /// launcher.py:382-408: empty guard → choose preset → choose action
-    /// (修改/删除) → apply + save. Any cancel returns with no side
-    /// effects.
-    static func managePresets() {
+    /// 修改收藏: opens the edit flow directly for the given preset
+    /// (menu entry: the preset row's 修改收藏 submenu item).
+    static func editPreset(_ preset: Preset) {
+        presetFlow(target: preset)
+    }
+
+    /// 删除收藏: confirm, then remove ALL presets with the same name
+    /// (launcher.py:405-408 parity).
+    static func deletePreset(_ preset: Preset) {
         let store = StateStore()
-        let state = store.load()
-        guard !state.presets.isEmpty else {
-            // launcher.py:383-385 `osa_dialog("管理收藏", "暂无收藏", "")`.
-            let alert = NSAlert()
-            alert.messageText = "管理收藏"
-            alert.informativeText = "暂无收藏"
-            AlertPresenter.presentModal(alert)
-            return
-        }
-
-        // launcher.py:387-390: choose the preset to manage.
-        let chooseAlert = NSAlert()
-        chooseAlert.messageText = "管理收藏"
-        chooseAlert.informativeText = "选择要管理的收藏:"
-        chooseAlert.addButton(withTitle: "确认")
-        chooseAlert.addButton(withTitle: "取消")
-        chooseAlert.buttons[1].keyEquivalent = "\u{1b}"
-        let choosePopup = NSPopUpButton()
-        choosePopup.addItems(withTitles: state.presets.map(\.name))
-        choosePopup.selectItem(at: 0)
-        let chooseGrid = NSGridView(views: [[label("收藏:"), choosePopup]])
-        chooseGrid.rowSpacing = 8
-        chooseGrid.columnSpacing = 12
-        chooseGrid.column(at: 1).xPlacement = .fill
-        chooseGrid.column(at: 1).width = 200
-        let chooseFitting = chooseGrid.fittingSize
-        chooseGrid.frame = NSRect(x: 0, y: 0, width: chooseFitting.width, height: chooseFitting.height)
-        chooseAlert.accessoryView = chooseGrid
-        guard AlertPresenter.presentModal(chooseAlert) == .alertFirstButtonReturn else { return }
-        guard let chosen = choosePopup.titleOfSelectedItem else { return }
-
-        // launcher.py:392-394: choose the action (修改/删除).
-        let actionAlert = NSAlert()
-        actionAlert.messageText = "管理收藏"
-        actionAlert.informativeText = "对「\(chosen)」执行:"
-        actionAlert.addButton(withTitle: "确认")
-        actionAlert.addButton(withTitle: "取消")
-        actionAlert.buttons[1].keyEquivalent = "\u{1b}"
-        let actionPopup = NSPopUpButton()
-        actionPopup.addItems(withTitles: ["修改", "删除"])
-        actionPopup.selectItem(at: 0)
-        let actionGrid = NSGridView(views: [[label("操作:"), actionPopup]])
-        actionGrid.rowSpacing = 8
-        actionGrid.columnSpacing = 12
-        actionGrid.column(at: 1).xPlacement = .fill
-        actionGrid.column(at: 1).width = 200
-        let actionFitting = actionGrid.fittingSize
-        actionGrid.frame = NSRect(x: 0, y: 0, width: actionFitting.width, height: actionFitting.height)
-        actionAlert.accessoryView = actionGrid
-        guard AlertPresenter.presentModal(actionAlert) == .alertFirstButtonReturn else { return }
-        guard let action = actionPopup.titleOfSelectedItem else { return }
-
-        if action == "修改" {
-            // launcher.py:396-399: find the preset by name → _preset_flow
-            // (target) for the in-place overwrite flow.
-            if let target = state.presets.first(where: { $0.name == chosen }) {
-                presetFlow(target: target)
-            }
-        } else if action == "删除" {
-            // launcher.py:405-408: confirm → remove ALL with that name + save.
-            let confirm = NSAlert()
-            confirm.messageText = "管理收藏"
-            confirm.informativeText = "确认删除收藏「\(chosen)」？"
-            confirm.addButton(withTitle: "确认")
-            confirm.addButton(withTitle: "取消")
-            guard AlertPresenter.presentModal(confirm) == .alertFirstButtonReturn else { return }
-            var updated = store.load()
-            updated.presets.removeAll { $0.name == chosen }
-            store.save(updated)
-        }
+        let confirm = NSAlert()
+        confirm.messageText = "管理收藏"
+        confirm.informativeText = "确认删除收藏「\(preset.name)」？"
+        confirm.addButton(withTitle: "确认")
+        confirm.addButton(withTitle: "取消")
+        confirm.buttons[1].keyEquivalent = "\u{1b}"
+        guard AlertPresenter.presentModal(confirm) == .alertFirstButtonReturn else { return }
+        var updated = store.load()
+        updated.presets.removeAll { $0.name == preset.name }
+        store.save(updated)
     }
 
     // MARK: - 运行收藏 (launcher.py:410-454)
@@ -363,6 +202,294 @@ enum PresetFlows {
 
     // MARK: - Alert construction
 
+    /// One type's field controls inside the dynamic preset form. `binder`
+    /// is retained so the popup/start defaults keep updating output/name
+    /// (target/action holds no strong reference).
+    final class PresetTypeFields {
+        let popup: NSPopUpButton
+        let startField: NSTextField
+        let secondField: NSTextField
+        let outputField: NSTextField
+        let nameField: NSTextField
+        let checkbox: NSButton?
+        let grid: NSView
+        let binder: PresetSaveBinder
+
+        init(
+            popup: NSPopUpButton,
+            startField: NSTextField, secondField: NSTextField,
+            outputField: NSTextField, nameField: NSTextField,
+            checkbox: NSButton?, grid: NSView, binder: PresetSaveBinder
+        ) {
+            self.popup = popup
+            self.startField = startField
+            self.secondField = secondField
+            self.outputField = outputField
+            self.nameField = nameField
+            self.checkbox = checkbox
+            self.grid = grid
+            self.binder = binder
+        }
+    }
+
+    /// Holds the dynamic preset form's alert + per-type fields + the
+    /// controller (retained for the whole modal session).
+    final class PresetFormContent {
+        let alert: NSAlert
+        let typePopup: NSPopUpButton
+        let fields: [String: PresetTypeFields]
+        let controller: PresetFormController
+
+        init(
+            alert: NSAlert, typePopup: NSPopUpButton,
+            fields: [String: PresetTypeFields], controller: PresetFormController
+        ) {
+            self.alert = alert
+            self.typePopup = typePopup
+            self.fields = fields
+            self.controller = controller
+        }
+    }
+
+    /// Swaps the field section when the type popup changes and grows or
+    /// shrinks the alert window by the height delta. NSAlert sizes its
+    /// window from the accessory's frame at build time, so a live swap
+    /// needs a manual window resize (the accessory is frame-based, no
+    /// autolayout contract).
+    @MainActor
+    final class PresetFormController: NSObject {
+        private let alert: NSAlert
+        private let container: NSView
+        private let typeRow: NSView
+        private let fieldGap: CGFloat
+        private let grids: [String: NSView]
+        private var current: NSView
+
+        init(
+            alert: NSAlert, container: NSView, typeRow: NSView, fieldGap: CGFloat,
+            grids: [String: NSView], initial: NSView
+        ) {
+            self.alert = alert
+            self.container = container
+            self.typeRow = typeRow
+            self.fieldGap = fieldGap
+            self.grids = grids
+            self.current = initial
+        }
+
+        @objc func typeChanged(_ sender: NSPopUpButton) {
+            guard let type = sender.titleOfSelectedItem,
+                  let grid = grids[type], grid !== current else { return }
+            let heightDelta = grid.frame.height - current.frame.height
+            current.removeFromSuperview()
+            var fieldFrame = grid.frame
+            fieldFrame.origin = .zero
+            grid.frame = fieldFrame
+            container.addSubview(grid)
+            // Re-append the type row so it stays on TOP of the z-order —
+            // addSubview stacks later views above earlier ones, and any
+            // frame overlap would otherwise swallow the popup's clicks.
+            typeRow.removeFromSuperview()
+            var typeRowFrame = typeRow.frame
+            typeRowFrame.origin.y = grid.frame.height + fieldGap
+            typeRow.frame = typeRowFrame
+            container.addSubview(typeRow)
+            current = grid
+
+            var containerFrame = container.frame
+            containerFrame.size.height += heightDelta
+            container.frame = containerFrame
+
+            guard heightDelta != 0 else {
+                alert.layout()
+                return
+            }
+            let window = alert.window
+            var windowFrame = window.frame
+            windowFrame.origin.y -= heightDelta
+            windowFrame.size.height += heightDelta
+            window.setFrame(windowFrame, display: true)
+            // Relayout the alert content so the accessory keeps its place
+            // within the resized window (buttons stay at the bottom).
+            alert.layout()
+        }
+    }
+
+    /// Builds the single-alert preset form: a type popup row on top, the
+    /// selected type's field grid below (channel/station popup, start,
+    /// second field, output, optional checkbox, name). All three type grids
+    /// are prebuilt with dv()-prefilled defaults; PresetFormController
+    /// swaps the field section live on type change.
+    private static func makePresetFormAlert(title: String, target: Preset?) -> PresetFormContent {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.alertStyle = .informational
+        alert.icon = DialogFlows.snowflakeIcon()
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+
+        let typePopup = NSPopUpButton()
+        typePopup.addItems(withTitles: ["下载字幕", "录制广播", "录制 TVer"])
+        let defaultType: String
+        switch target?.action {
+        case .subtitle: defaultType = "下载字幕"
+        case .radio: defaultType = "录制广播"
+        case .tver: defaultType = "录制 TVer"
+        case .none: defaultType = "下载字幕"
+        }
+        let defaultIndex = typePopup.indexOfItem(withTitle: defaultType)
+        if defaultIndex >= 0 { typePopup.selectItem(at: defaultIndex) }
+
+        let typeRow = NSGridView(views: [[label("类型:"), typePopup]])
+        typeRow.columnSpacing = 12
+        typeRow.column(at: 1).xPlacement = .fill
+        typeRow.column(at: 1).width = 200
+        let typeRowHeight = typeRow.fittingSize.height
+
+        // ── 下载字幕 fields ──
+        let subChannel = dv(target?.channel, fallback: "TBS")
+        let subStart = dv(target?.timeStart, fallback: "19:00")
+        let subEnd = dv(target?.timeEnd, fallback: "20:00")
+        let subFields = buildTypeFields(
+            popupLabel: "频道:",
+            options: CommandBuilder.channelOrder, popupDefault: subChannel,
+            startLabel: "开始时间 (HH:MM):", startDefault: subStart,
+            secondLabel: "结束时间 (HH:MM):", secondDefault: subEnd,
+            outputInitial: dv(target?.output, fallback: "sub_\(subChannel.lowercased())"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: subChannel, start: subStart)),
+            outputFormat: { "sub_\($0.lowercased())" },
+            nameFormat: { ch, start in presetNameDefault(action: .subtitle, channel: ch, start: start) })
+
+        // ── 录制广播 fields ──
+        let radioStation = dv(target?.station, fallback: "TBS")
+        let radioStart = dv(target?.startAt, fallback: "21:00")
+        let radioDuration = dv(target?.duration, fallback: "30")
+        let radioFields = buildTypeFields(
+            popupLabel: "电台:",
+            options: CommandBuilder.radioStations, popupDefault: radioStation,
+            startLabel: "开始时间 (HH:MM):", startDefault: radioStart,
+            secondLabel: "录制时长 (分钟):", secondDefault: radioDuration,
+            outputInitial: dv(target?.output, fallback: "radio_\(radioStation.lowercased()).m4a"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .radio, channel: radioStation, start: radioStart)),
+            outputFormat: { "radio_\($0.lowercased()).m4a" },
+            nameFormat: { st, start in presetNameDefault(action: .radio, channel: st, start: start) },
+            checkboxLabel: "转换为视频", checkboxDefault: target?.toVideo ?? false)
+
+        // ── 录制 TVer fields ──
+        let tvChannel = dv(target?.channel, fallback: "TBS")
+        let tvStart = dv(target?.startAt, fallback: "21:00")
+        let tvDuration = dv(target?.duration, fallback: "60")
+        let tvEnd = LabelHelpers.endTimeLabel(startAt: tvStart, durationMin: tvDuration)
+        let tverFields = buildTypeFields(
+            popupLabel: "频道:",
+            options: CommandBuilder.channelOrder, popupDefault: tvChannel,
+            startLabel: "开始时间 (HH:MM):", startDefault: tvStart,
+            secondLabel: "结束时间 (HH:MM):", secondDefault: tvEnd,
+            outputInitial: dv(target?.output, fallback: "\(tvChannel.lowercased()).mp4"),
+            nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: tvChannel, start: tvStart)),
+            outputFormat: { "\($0.lowercased()).mp4" },
+            nameFormat: { ch, start in presetNameDefault(action: .tver, channel: ch, start: start) })
+
+        let fields: [String: PresetTypeFields] = [
+            "下载字幕": subFields, "录制广播": radioFields, "录制 TVer": tverFields,
+        ]
+        let initialFields = fields[defaultType] ?? subFields
+
+        // Accessory = type row pinned to the TOP, field section below with
+        // a gap; the window grows downward on type switch so the type row
+        // never moves (non-flipped coords: y grows up).
+        let fieldGap: CGFloat = 10
+        let containerWidth = max(typeRow.fittingSize.width, initialFields.grid.frame.width)
+        let container = NSView(frame: NSRect(
+            x: 0, y: 0,
+            width: containerWidth,
+            height: typeRowHeight + fieldGap + initialFields.grid.frame.height))
+        var initialFrame = initialFields.grid.frame
+        initialFrame.origin = .zero
+        initialFields.grid.frame = initialFrame
+        container.addSubview(initialFields.grid)
+        typeRow.frame = NSRect(x: 0, y: initialFrame.height + fieldGap,
+                               width: containerWidth, height: typeRowHeight)
+        container.addSubview(typeRow)
+        alert.accessoryView = container
+
+        let grids: [String: NSView] = [
+            "下载字幕": subFields.grid, "录制广播": radioFields.grid, "录制 TVer": tverFields.grid,
+        ]
+        let controller = PresetFormController(
+            alert: alert, container: container, typeRow: typeRow, fieldGap: fieldGap,
+            grids: grids, initial: initialFields.grid)
+        typePopup.target = controller
+        typePopup.action = #selector(PresetFormController.typeChanged(_:))
+
+        return PresetFormContent(
+            alert: alert, typePopup: typePopup, fields: fields, controller: controller)
+    }
+
+    /// Builds one type's field grid (channel/station popup + start + second
+    /// field + output + optional checkbox + 收藏名称) with its live default
+    /// binder (popup/start changes re-derive output/name while untouched).
+    private static func buildTypeFields(
+        popupLabel: String,
+        options: [String],
+        popupDefault: String,
+        startLabel: String, startDefault: String,
+        secondLabel: String, secondDefault: String,
+        outputInitial: String,
+        nameInitial: String,
+        outputFormat: @escaping (String) -> String,
+        nameFormat: @escaping (String, String) -> String,
+        checkboxLabel: String? = nil,
+        checkboxDefault: Bool = false
+    ) -> PresetTypeFields {
+        let popup = NSPopUpButton()
+        popup.addItems(withTitles: options)
+        let defaultIndex = popup.indexOfItem(withTitle: popupDefault)
+        if defaultIndex >= 0 { popup.selectItem(at: defaultIndex) }
+
+        let startField = NSTextField(string: startDefault)
+        let secondField = NSTextField(string: secondDefault)
+        let outputField = NSTextField(string: outputInitial)
+        let nameField = NSTextField(string: nameInitial)
+
+        let checkbox: NSButton?
+        if let checkboxLabel {
+            let button = NSButton(checkboxWithTitle: checkboxLabel, target: nil, action: nil)
+            button.state = checkboxDefault ? .on : .off
+            checkbox = button
+        } else {
+            checkbox = nil
+        }
+
+        var rows: [[NSView]] = [
+            [label(popupLabel), popup],
+            [label(startLabel), startField],
+            [label(secondLabel), secondField],
+            [label("输出文件名:"), outputField],
+        ]
+        if let checkbox { rows.append([label(""), checkbox]) }
+        rows.append([label("收藏名称:"), nameField])
+
+        let grid = NSGridView(views: rows)
+        grid.rowSpacing = 8
+        grid.columnSpacing = 12
+        grid.column(at: 1).xPlacement = .fill
+        grid.column(at: 1).width = 200
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
+
+        let binder = PresetSaveBinder(
+            outputFormat: outputFormat, nameFormat: nameFormat,
+            popup: popup, startField: startField,
+            outputField: outputField, nameField: nameField)
+
+        return PresetTypeFields(
+            popup: popup, startField: startField, secondField: secondField,
+            outputField: outputField, nameField: nameField,
+            checkbox: checkbox, grid: grid, binder: binder)
+    }
+
     /// launcher.py:313 `dv(field, fallback)`:
     /// `return target.get(field, fallback) if target else fallback`.
     private static func dv(_ value: String?, fallback: String) -> String {
@@ -409,6 +536,7 @@ enum PresetFlows {
         let alert = NSAlert()
         alert.messageText = title
         alert.alertStyle = .informational
+        alert.icon = DialogFlows.snowflakeIcon()
         alert.addButton(withTitle: "确认")
         alert.addButton(withTitle: "取消")
         alert.buttons[1].keyEquivalent = "\u{1b}"
