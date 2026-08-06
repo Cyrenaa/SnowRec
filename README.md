@@ -185,7 +185,7 @@ Opens a TVer live page in a headless Playwright browser, handles the age-verific
 .venv/bin/python tver_fetch_url.py https://tver.jp/live/tbs --timeout 60 --json
 ```
 
-Normally not called directly; invoked automatically by `tver_wrapper.py` and `download_vtt.py`.
+Normally not called directly; invoked automatically by `tver_wrapper.py` and `download_vtt.py`. If the Playwright Chromium browser binary is missing (e.g. after a playwright upgrade bumped the required build), it auto-runs `playwright install chromium` and retries once — no manual step needed.
 
 ---
 

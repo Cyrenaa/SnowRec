@@ -9,6 +9,7 @@ Outputs the best variant m3u8 URL to stdout on success.
 import argparse
 import asyncio
 import re
+import subprocess
 import sys
 import json
 from datetime import datetime
@@ -265,6 +266,50 @@ def resolve_manifest(manifest_url: str) -> dict:
     return result
 
 
+# ==== Playwright 浏览器缺失自动安装 ====
+def install_playwright_browser() -> bool:
+    print(f"[{timestamp()}] 检测到 Playwright 浏览器缺失, 正在自动安装 (可能需要几分钟)...",
+          file=sys.stderr)
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+        )
+    except Exception as e:
+        print(f"[{timestamp()}] 浏览器自动安装失败: {e}", file=sys.stderr)
+        return False
+    if result.returncode != 0:
+        print(f"[{timestamp()}] 浏览器自动安装失败 (退出码 {result.returncode})",
+              file=sys.stderr)
+        return False
+    print(f"[{timestamp()}] 浏览器安装完成", file=sys.stderr)
+    return True
+
+
+async def _launch_chromium(p):
+    """Launch headless Chromium; auto-install the browser once if missing.
+
+    Playwright upgrades bump the required browser build (e.g. 1228 -> 1234),
+    so the cached browser may be missing after 'uv sync'. Catch the launch
+    failure, run 'playwright install chromium', and retry once.
+    """
+    try:
+        return await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
+        )
+    except Exception as e:
+        if "Executable doesn't exist" not in str(e):
+            raise
+        print(f"[{timestamp()}] Playwright 浏览器缺失: {e}", file=sys.stderr)
+        if install_playwright_browser():
+            print(f"[{timestamp()}] 重试启动浏览器...", file=sys.stderr)
+            return await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"],
+            )
+        raise
+
+
 async def capture_manifest(tver_url: str, timeout: int = 45) -> str | None:
     """Use Playwright to open TVer page and capture the master m3u8 URL."""
     captured = []
@@ -275,10 +320,7 @@ async def capture_manifest(tver_url: str, timeout: int = 45) -> str | None:
             captured.append(url)
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"],
-        )
+        browser = await _launch_chromium(p)
         context = await browser.new_context(
             user_agent=HEADERS["User-Agent"],
             locale="ja-JP",
