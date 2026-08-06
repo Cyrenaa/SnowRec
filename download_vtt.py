@@ -8,9 +8,18 @@ import argparse
 import json
 import sys
 import threading
+import socket
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
+
+# Global fallback: any socket operation (including TLS handshakes through a
+# proxy) must time out instead of hanging the process forever. Observed:
+# a dead proxy left Phase 2 blocked in poll() for 48 minutes with no error.
+socket.setdefaulttimeout(20)
+# Flush prints immediately when stdout is redirected to a file (block
+# buffering would hide progress in the launcher log until the buffer fills).
+sys.stdout.reconfigure(line_buffering=True)
 
 # ============================================================
 # 配置
@@ -360,8 +369,7 @@ def cleanup():
 
 
 def convert_to_srt(vtt_path: Path) -> bool:
-    date_str = datetime.now().strftime("%y%m%d")
-    srt_path = vtt_path.with_stem(date_str).with_suffix(".srt")
+    srt_path = vtt_path.with_suffix(".srt")
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-i", str(vtt_path), str(srt_path)],
@@ -1285,6 +1293,7 @@ def main_live_window(url: str, start_time: str, end_time: str,
     def phase2_forward():
         seen_ids = set()
         count = 0
+        consecutive_failures = 0
 
         while running[0]:
             now = datetime.now().astimezone()
@@ -1297,9 +1306,15 @@ def main_live_window(url: str, start_time: str, end_time: str,
                 try:
                     segments = fetch_playlist(playlist_url, headers)
                 except Exception as e:
+                    consecutive_failures += 1
                     print(f"[Phase 2] playlist 失败: {e}")
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                        print(f"[Phase 2] 连续 {MAX_CONSECUTIVE_FAILURES} 次失败，停止")
+                        running[0] = False
+                        break
                     time.sleep(2)
                     continue
+                consecutive_failures = 0
 
                 next_ready = None
                 for seg_url, seg_pdt, seg_dur in segments:
