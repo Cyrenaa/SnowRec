@@ -41,13 +41,24 @@ enum RestartSupport {
         let decision = restartDecision()
         switch decision.mode {
         case "bundle":
-            // NSWorkspace launches the .app as a new process; the current
-            // one terminates right after (quit_application parity).
-            NSWorkspace.shared.open(URL(fileURLWithPath: decision.path))
+            // NSWorkspace.open on our own bundle races with LaunchServices
+            // instance dedup: the request lands while this instance is still
+            // running, LS activates the OLD instance instead of spawning a
+            // new one, and the immediate terminate below leaves NO new
+            // instance behind. Directly exec the bundle executable instead
+            // — LaunchServices is bypassed entirely (the app sets the
+            // .accessory policy itself at launch).
+            let execPath = Bundle.main.executableURL?.path ?? decision.path
+            reexec(execPath, fallbackPath: decision.path)
         default:
-            reexec(decision.path)
+            reexec(decision.path, fallbackPath: nil)
         }
-        NSApp.terminate(nil)
+        // NSApp.terminate for the graceful AppKit path (GUI mode); a bare
+        // exit(0) when the app object was never created (QA test flags run
+        // before NSApplication.shared in main.swift).
+        if NSApp != nil {
+            NSApp.terminate(nil)
+        }
         exit(0)
     }
 
@@ -61,9 +72,14 @@ enum RestartSupport {
     /// a NULL envp on macOS posix_spawn yields an EMPTY environment,
     /// NOT inheritance (verified empirically). The relaunch is
     /// fire-and-forget: no waitpid — the child is reparented to launchd
-    /// when this process terminates. On spawn failure the parent simply
-    /// terminates (the user can relaunch manually).
-    private static func reexec(_ path: String) {
+    /// when this process terminates. On spawn failure the caller-provided
+    /// fallback path is launched via NSWorkspace (bundle mode only) and
+    /// the parent still terminates.
+    private static func reexec(_ path: String, fallbackPath: String?) {
+        // Resolve relative paths (swift run passes a cwd-relative
+        // CommandLine.arguments[0]) against the CURRENT cwd, so the spawn
+        // never depends on the child's later working directory.
+        let resolvedPath = URL(fileURLWithPath: path).standardizedFileURL.path
         var pid: pid_t = 0
         var attr: posix_spawnattr_t?
         guard posix_spawnattr_init(&attr) == 0 else { return }
@@ -81,6 +97,15 @@ enum RestartSupport {
         var envp = env + [nil]
 
         posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
-        posix_spawn(&pid, path, nil, &attr, &argv, &envp)
+        let status = posix_spawn(&pid, resolvedPath, nil, &attr, &argv, &envp)
+        if status != 0 {
+            if let fallbackPath {
+                NSLog("RestartSupport: posix_spawn(%@) failed (%d); falling back to NSWorkspace.open(%@)",
+                      resolvedPath, status, fallbackPath)
+                NSWorkspace.shared.open(URL(fileURLWithPath: fallbackPath))
+            } else {
+                NSLog("RestartSupport: posix_spawn(%@) failed (%d)", resolvedPath, status)
+            }
+        }
     }
 }

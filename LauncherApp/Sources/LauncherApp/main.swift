@@ -118,6 +118,26 @@ if CommandLine.arguments.contains("--dump-restart") {
     exit(0)
 }
 
+// --restart-test: exercise the REAL relaunch round-trip. Phase 1 writes a
+// marker file, prints "restartPhase=1", then calls RestartSupport.
+// performRestart() — the relaunched instance inherits the SAME arguments,
+// so Phase 2 (marker file present) deletes it, prints "restartPhase=2" and
+// exits 0. A surviving phase-2 print proves the posix_spawn relaunch
+// (absolute-path resolution + env inheritance) worked end to end.
+// Marker path: $TMPDIR/snowrec-restart-test (honors HOME-less sandboxes).
+if CommandLine.arguments.contains("--restart-test") {
+    let marker = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("snowrec-restart-test").path
+    if FileManager.default.fileExists(atPath: marker) {
+        try? FileManager.default.removeItem(atPath: marker)
+        print("restartPhase=2")
+        exit(0)
+    }
+    FileManager.default.createFile(atPath: marker, contents: Data("1".utf8))
+    print("restartPhase=1")
+    RestartSupport.performRestart()
+}
+
 // --dump-notifications: print the CURRENT notification authorizationStatus
 // (authorized / denied / notDetermined / provisional) on a labeled line,
 // then every DELIVERED notification as `delivered=["id","title","body"]`
