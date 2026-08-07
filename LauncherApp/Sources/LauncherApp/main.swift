@@ -99,11 +99,43 @@ if CommandLine.arguments.contains("--dump-builders") {
         repoRoot: root, channel: "TBS",
         startAt: "21:00", duration: "30", output: "tbs.mp4")
     print("tver=\(json(tverCmd))")
+    let subtitleTranslateCmd = CommandBuilder.subtitleCommand(
+        repoRoot: root, channel: "CX (富士)",
+        timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)", translate: true)
+    print("subtitleTranslate=\(json(subtitleTranslateCmd))")
+    let tverTranslateCmd = CommandBuilder.tverCommand(
+        repoRoot: root, channel: "TBS",
+        startAt: "21:00", duration: "30", output: "tbs.mp4", translate: true)
+    print("tverTranslate=\(json(tverTranslateCmd))")
     let unknownCmd = CommandBuilder.subtitleCommand(
         repoRoot: root, channel: "NOPE",
         timeStart: "19:00", timeEnd: "20:00", output: "x.srt")
     print("unknownChannel=\(json(unknownCmd))")
     exit(0)
+}
+
+// --dump-alert-content: build the REAL alert contents for the three flows
+// (subtitle / tver / radio) WITHOUT presenting them, print each checkbox
+// title + default state on labeled lines, and assert the --translate wiring:
+// the subtitle alert must expose BOTH checkboxes (历史字幕 + 翻译为中文), the
+// tver alert the 翻译为中文 checkbox, and the radio alert the 转换为视频
+// checkbox. Exit 0 on pass, 1 on fail. No SNOWREC_ROOT needed (no command
+// building — unlike --dump-builders).
+if CommandLine.arguments.contains("--dump-alert-content") {
+    func state(_ button: NSButton?) -> String {
+        button?.state == .on ? "on" : "off"
+    }
+    let subtitle = DialogFlows.subtitleAlert()
+    print("subtitle=\(subtitle.checkbox?.title ?? "-"):\(state(subtitle.checkbox)),"
+        + "\(subtitle.secondCheckbox?.title ?? "-"):\(state(subtitle.secondCheckbox))")
+    let tver = DialogFlows.tverAlert()
+    print("tver=\(tver.checkbox?.title ?? "-"):\(state(tver.checkbox))")
+    let radio = DialogFlows.radioAlert()
+    print("radio=\(radio.checkbox?.title ?? "-"):\(state(radio.checkbox))")
+    let pass = subtitle.checkbox != nil && subtitle.secondCheckbox != nil
+        && tver.checkbox != nil && radio.checkbox != nil
+    print("alertContentAssert=\(pass ? "pass" : "fail")")
+    exit(pass ? 0 : 1)
 }
 
 // --dump-restart: print the restart decision from
@@ -525,6 +557,34 @@ if CommandLine.arguments.contains("--preset-test") {
         finish(PresetTestResult(
             mode: "run", presets: store.load().presets,
             entry: entry, stopped: stopped, status: task.status))
+    case "translate":
+        // Scripted SUBTITLE preset ("SUB TRANS") carrying translate=true; QA
+        // of the --translate round-trip through preset persistence. No spawn,
+        // so SNOWREC_ROOT is not required (repoRoot falls back to "").
+        let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"] ?? ""
+        var state = store.load()
+        if !state.presets.contains(where: { $0.name == "SUB TRANS" }) {
+            state.presets.append(Preset(
+                name: "SUB TRANS", action: .subtitle, channel: "TBS",
+                station: nil, timeStart: "19:00", timeEnd: "20:00",
+                startAt: nil, duration: nil, output: "sub_tbs",
+                endTime: nil, translate: true))
+            store.save(state)
+        }
+        guard let preset = store.load().presets.first(where: { $0.name == "SUB TRANS" }) else {
+            FileHandle.standardError.write(
+                Data("--preset-test translate: preset not found after ensure\n".utf8))
+            exit(1)
+        }
+        let presetsData = (try? encoder.encode(store.load().presets)) ?? Data("[]".utf8)
+        print("presets=\(String(data: presetsData, encoding: .utf8) ?? "[]")")
+        let builtCmd = CommandBuilder.subtitleCommand(
+            repoRoot: root, channel: "TBS",
+            timeStart: "19:00", timeEnd: "20:00", output: "sub_tbs",
+            translate: preset.translate ?? false)
+        let builtData = (try? encoder.encode(builtCmd)) ?? Data("[]".utf8)
+        print("built=\(String(data: builtData, encoding: .utf8) ?? "[]")")
+        exit(0)
     default:
         FileHandle.standardError.write(
             Data("--preset-test: unknown mode '\(mode)'\n".utf8))

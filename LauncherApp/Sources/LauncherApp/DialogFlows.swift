@@ -34,7 +34,8 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
             outputInitial: "sub_tbs",
-            checkboxLabel: "历史字幕", checkboxDefault: false)
+            checkboxLabel: "历史字幕", checkboxDefault: false,
+            secondCheckboxLabel: "翻译为中文", secondCheckboxDefault: false)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -45,9 +46,10 @@ enum DialogFlows {
             return  // empty input == cancel (launcher.py: `if not x: return`)
         }
         let history = content.checkbox?.state == .on
+        let translate = content.secondCheckbox?.state == .on
         startSubtitle(delegate: delegate, channel: channel,
                       timeStart: timeStart, timeEnd: timeEnd, output: output,
-                      history: history)
+                      history: history, translate: translate)
     }
 
     /// launcher.py:564-589 `_new_radio`.
@@ -94,6 +96,37 @@ enum DialogFlows {
             checkboxLabel: "转换为视频", checkboxDefault: false)
     }
 
+    /// Internal QA hook: builds the REAL subtitle-flow alert — the exact same
+    /// makeTaskAlert construction as newSubtitle (history + translate checkboxes)
+    /// — WITHOUT running the modal, so a probe can verify its construction.
+    static func subtitleAlert() -> TaskAlertContent {
+        makeTaskAlert(
+            title: "下载字幕",
+            popupLabel: "频道:",
+            options: CommandBuilder.channelOrder,
+            defaultOption: "TBS",
+            startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
+            secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
+            outputInitial: "sub_tbs",
+            checkboxLabel: "历史字幕", checkboxDefault: false,
+            secondCheckboxLabel: "翻译为中文", secondCheckboxDefault: false)
+    }
+
+    /// Internal QA hook: builds the REAL tver-flow alert — the exact same
+    /// makeTaskAlert construction as newTver (translate checkbox) — WITHOUT
+    /// running the modal, so a probe can verify its construction.
+    static func tverAlert() -> TaskAlertContent {
+        makeTaskAlert(
+            title: "预约 TVer 录制",
+            popupLabel: "频道:",
+            options: CommandBuilder.channelOrder,
+            defaultOption: "TBS",
+            startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
+            secondLabel: "结束时间 (HH:MM):", secondDefault: "22:00",
+            outputInitial: "tbs.mp4",
+            checkboxLabel: "翻译为中文", checkboxDefault: false)
+    }
+
     /// launcher.py:493-520 `_new_recording`.
     static func newTver(delegate: AppDelegate) {
         let content = makeTaskAlert(
@@ -103,7 +136,8 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "22:00",
-            outputInitial: "tbs.mp4")
+            outputInitial: "tbs.mp4",
+            checkboxLabel: "翻译为中文", checkboxDefault: false)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -114,8 +148,10 @@ enum DialogFlows {
               CommandBuilder.channels[channel] != nil else {
             return  // empty/unknown input == cancel (launcher.py:648 page_url check)
         }
+        let translate = content.checkbox?.state == .on
         startTver(delegate: delegate, channel: channel,
-                  startAt: startAt, endTime: endTime, output: output)
+                  startAt: startAt, endTime: endTime, output: output,
+                  translate: translate)
     }
 
     // MARK: - Post-confirm pipeline (shared with --flow-test)
@@ -126,12 +162,12 @@ enum DialogFlows {
     static func startSubtitle(
         delegate: AppDelegate, channel: String,
         timeStart: String, timeEnd: String, output: String,
-        history: Bool = false
+        history: Bool = false, translate: Bool = false
     ) -> Task {
         let cmd = CommandBuilder.subtitleCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
             channel: channel, timeStart: timeStart, timeEnd: timeEnd, output: output,
-            history: history)
+            history: history, translate: translate)
         let name = "字幕 \(channel) \(timeStart)-\(timeEnd)"
         return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
     }
@@ -161,7 +197,8 @@ enum DialogFlows {
     @discardableResult
     static func startTver(
         delegate: AppDelegate, channel: String,
-        startAt: String, endTime: String, output: String
+        startAt: String, endTime: String, output: String,
+        translate: Bool = false
     ) -> Task? {
         guard let duration = LabelHelpers.durationMin(startAt: startAt, endTime: endTime),
               duration > 0 else {
@@ -170,7 +207,8 @@ enum DialogFlows {
         guard AlertPresenter.confirmLongDuration(minutes: duration) else { return nil }
         let cmd = CommandBuilder.tverCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
-            channel: channel, startAt: startAt, duration: String(duration), output: output)
+            channel: channel, startAt: startAt, duration: String(duration), output: output,
+            translate: translate)
         let name = "TVer \(channel) \(startAt)-\(endTime)"  // ENTERED endTime (launcher.py:660)
         return startFlow(
             delegate: delegate,
@@ -242,7 +280,8 @@ enum DialogFlows {
         startLabel: String, startDefault: String,
         secondLabel: String, secondDefault: String,
         outputInitial: String,
-        checkboxLabel: String? = nil, checkboxDefault: Bool = false
+        checkboxLabel: String? = nil, checkboxDefault: Bool = false,
+        secondCheckboxLabel: String? = nil, secondCheckboxDefault: Bool = false
     ) -> TaskAlertContent {
         let alert = NSAlert()
         alert.messageText = title
@@ -276,6 +315,13 @@ enum DialogFlows {
             checkbox = box
             rows.append([label(""), box])
         }
+        var secondCheckbox: NSButton?
+        if let secondCheckboxLabel {
+            let box = NSButton(checkboxWithTitle: secondCheckboxLabel, target: nil, action: nil)
+            box.state = secondCheckboxDefault ? .on : .off
+            secondCheckbox = box
+            rows.append([label(""), box])
+        }
 
         let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
@@ -295,7 +341,8 @@ enum DialogFlows {
         return TaskAlertContent(
             alert: alert, popup: popup,
             startField: startField, secondField: secondField,
-            outputField: outputField, checkbox: checkbox)
+            outputField: outputField, checkbox: checkbox,
+            secondCheckbox: secondCheckbox)
     }
 
     /// Grid cell label: right-aligned, non-editable.
@@ -326,7 +373,9 @@ enum DialogFlows {
 
     /// Holds a flow alert's controls. `checkbox` is nil only for the tver
     /// flow (no checkbox row); the radio flow reads `checkbox?.state == .on`
-    /// for 转换为视频, the subtitle flow for 历史字幕.
+    /// for 转换为视频, the subtitle flow for 历史字幕. `secondCheckbox` is set
+    /// only for the subtitle flow (翻译为中文); the tver flow reads
+    /// `checkbox?.state == .on` for 翻译为中文.
     final class TaskAlertContent {
         let alert: NSAlert
         let popup: NSPopUpButton
@@ -334,11 +383,13 @@ enum DialogFlows {
         let secondField: NSTextField
         let outputField: NSTextField
         let checkbox: NSButton?
+        let secondCheckbox: NSButton?
 
         init(
             alert: NSAlert, popup: NSPopUpButton,
             startField: NSTextField, secondField: NSTextField,
-            outputField: NSTextField, checkbox: NSButton?
+            outputField: NSTextField, checkbox: NSButton?,
+            secondCheckbox: NSButton?
         ) {
             self.alert = alert
             self.popup = popup
@@ -346,6 +397,7 @@ enum DialogFlows {
             self.secondField = secondField
             self.outputField = outputField
             self.checkbox = checkbox
+            self.secondCheckbox = secondCheckbox
         }
     }
 }

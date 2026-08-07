@@ -41,6 +41,7 @@ Schedules a recording, automatically resolves the TVer stream URL, and records v
 | `-c, --concurrency` | int (default 8) | Number of concurrent downloads |
 | `-p, --poll-interval` | float (default 2.0) | Poll interval in seconds |
 | `--fetch-timeout` | int (default 60) | Stream URL fetch timeout in seconds |
+| `--translate` | flag | Translate the produced SRT to Chinese via `srt_translate.py` (needs `DEEPSEEK_API_KEY` or `--api-key`) |
 
 ```bash
 # Schedule TBS recording at 18:00 for 115 minutes
@@ -52,6 +53,12 @@ caffeinate -s .venv/bin/python tver_wrapper.py \
 .venv/bin/python tver_wrapper.py \
   --tver-page https://tver.jp/live/tbs \
   -d 30 -o tbs.mp4
+
+# Record and translate the subtitles to Chinese
+export DEEPSEEK_API_KEY="sk-your-key"
+.venv/bin/python tver_wrapper.py \
+  --tver-page https://tver.jp/live/tbs \
+  -d 30 -o tbs.mp4 --translate
 ```
 
 ---
@@ -76,6 +83,9 @@ Downloads VTT segments from the HLS subtitle stream and merges them, outputting 
 | `--history` | flag | 窗口已过时直接回看下载历史字幕（默认顺延到明天同一时段） |
 | `--keep` | flag | Keep the temporary `vtt_files/` directory |
 | `--fetch-timeout` | int (default 60) | Stream URL fetch timeout in seconds |
+| `--translate` | flag | Translate the produced SRT to Chinese via `srt_translate.py`; conflicts with `--no-srt` (argparse error) |
+
+`--translate` runs `srt_translate.py` on the produced SRT, so it needs the `DEEPSEEK_API_KEY` env var or `--api-key`. It is incompatible with `--no-srt` (no SRT file to translate); combining them is rejected at argument parse time.
 
 ### The 6 Modes
 
@@ -84,6 +94,12 @@ Downloads VTT segments from the HLS subtitle stream and merges them, outputting 
 .venv/bin/python download_vtt.py \
   --tver-page https://tver.jp/live/tbs \
   --time-start 20:00 --time-end 21:00
+
+# Same window, then translate the subtitles to Chinese
+export DEEPSEEK_API_KEY="sk-your-key"
+.venv/bin/python download_vtt.py \
+  --tver-page https://tver.jp/live/tbs \
+  --time-start 20:00 --time-end 21:00 --translate
 
 # ② Known ID range
 .venv/bin/python download_vtt.py \
@@ -213,7 +229,7 @@ The app appears as a ❄️ status item in the menu bar (no Dock icon). State pe
 
 | Item | Description |
 |------|-------------|
-| `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task from a single form dialog: channel/station is a drop-down, parameters are input boxes, and the radio-to-MP4 option is a 转换为视频 checkbox (equivalent to `--to-video`, needs a same-name image). The subtitle form also has a 历史字幕 checkbox (equivalent to `--history`, for scanning an already-past window), and the TVer form takes 开始时间 and 结束时间, computing the recording duration from the two. Presets first ask for the type, then show the same form |
+| `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task from a single form dialog: channel/station is a drop-down, parameters are input boxes, and the radio-to-MP4 option is a 转换为视频 checkbox (equivalent to `--to-video`, needs a same-name image). The subtitle form also has a 历史字幕 checkbox (equivalent to `--history`, for scanning an already-past window), and both the subtitle and TVer forms have a 翻译为中文 checkbox (equivalent to `--translate`, runs `srt_translate.py` on the produced SRT; needs the DeepSeek key, see below). The TVer form takes 开始时间 and 结束时间, computing the recording duration from the two. Presets first ask for the type, then show the same form |
 | `⭐ 收藏` | Presets: 新建收藏 / 管理收藏, plus clickable preset entries to run them. 修改 re-runs the full creation flow with the current values pre-filled, then overwrites the preset in place |
 | `🕐 最近` | Recent tasks with status; re-run a task or view its command/log |
 | `⏹ 停止全部` | Terminate all running tasks (shown only while tasks are active) |
@@ -221,6 +237,8 @@ The app appears as a ❄️ status item in the menu bar (no Dock icon). State pe
 | `退出` | Quit |
 
 TVer presets store the 结束时间 value as `end_time` alongside the computed duration, so re-running a preset restores the same recording window. Editing a TVer preset re-derives the 结束时间 default from the stored start + duration (a custom stored `end_time` is no longer auto-shown, though it is still saved on confirm).
+
+**DeepSeek key for translation**: tasks launched with the 翻译为中文 checkbox run `srt_translate.py`, which needs the `DEEPSEEK_API_KEY` env var. TaskManager spawns the child scripts inheriting the parent environment, so the key must be visible to the process that launched the app. Put `export DEEPSEEK_API_KEY="sk-..."` in your shell profile when launching from a terminal, or `launchctl setenv DEEPSEEK_API_KEY sk-...` for Finder/launchd launches. A task started with the checkbox and no key fails with `[ERR]`.
 
 > **Deploy copy**: the deploy copy at `/Users/wyn/Documents/script/` (a separate git repo) is NOT auto-synced. After this repo switches its launcher to the Swift app, sync the deploy copy yourself.
 

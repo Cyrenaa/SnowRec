@@ -44,7 +44,8 @@ enum CommandBuilder {
         timeStart: String,
         timeEnd: String,
         output: String,
-        history: Bool = false
+        history: Bool = false,
+        translate: Bool = false
     ) -> [String] {
         let pageURL = channels[channel] ?? ""
         var cmd = [
@@ -56,6 +57,9 @@ enum CommandBuilder {
         ]
         if history {
             cmd.append("--history")
+        }
+        if translate {
+            cmd.append("--translate")
         }
         return cmd
     }
@@ -96,15 +100,20 @@ enum CommandBuilder {
         channel: String,
         startAt: String,
         duration: String,
-        output: String
+        output: String,
+        translate: Bool = false
     ) -> [String] {
         let pageURL = channels[channel] ?? ""
-        return [
+        var cmd = [
             "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/tver_wrapper.py",
             "--tver-page", pageURL,
             "--start-at", startAt,
             "-d", duration,
             "-o", output,
         ]
+        if translate {
+            cmd.append("--translate")
+        }
+        return cmd
     }
 }

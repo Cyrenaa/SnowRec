@@ -33,6 +33,7 @@ script/
 | Ad-skip logic | `live_recorder_sub.py`: `AdTracker` (SCTE35 daterange parsing) |
 | radiko auth | `radiko_recorder.py`: `RadikoAuth` (auth1/auth2) |
 | SRT translation | `srt_translate.py`: `parse_srt_lines` / `split_into_blocks` / `build_prompt` / `call_deepseek` / `translate_all` / `assemble_srt` |
+| `--translate` wiring | `download_vtt.py`: `run_translate` (~line 387) + `TRANSLATE_SCRIPT` (~line 1512); `tver_wrapper.py`: `run_translate` (~line 37) + `TRANSLATE_SCRIPT` (line 29); LauncherApp: `CommandBuilder` translate params + `DialogFlows`/`PresetFlows` 翻译为中文 checkbox |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
 | GUI scheduling / persistence | `LauncherApp/Sources/LauncherApp/AppDelegate.swift` (lifecycle + 5s rebuild) + `TaskManager.swift` (spawn/stop) + `StateStore.swift` (JSON state) |
 
@@ -57,6 +58,7 @@ script/
 | `call_deepseek` | function | srt_translate.py:116 | DeepSeek chat-completions POST; retries 429/5xx, AuthError on 401 |
 | `translate_all` | function | srt_translate.py:250 | ThreadPoolExecutor block translation, ordered by text ordinal, stop flag |
 | `assemble_srt` | function | srt_translate.py:295 | Reassemble SRT with translated text substituted in place |
+| `run_translate` | function | download_vtt.py:387 / tver_wrapper.py:37 | Invoke `srt_translate.py` on the SRT via subprocess; return its exit code |
 | `AppDelegate` | class | LauncherApp/Sources/LauncherApp/AppDelegate.swift | NSStatusItem app lifecycle + 5s menu rebuild |
 | `TaskManager` | enum | LauncherApp/Sources/LauncherApp/TaskManager.swift | Task spawn + log redirection + termination chain (swift-subprocess) |
 | `MenuBuilder` | enum | LauncherApp/Sources/LauncherApp/MenuBuilder.swift | Status-menu tree (parity with the legacy rumps GUI) |
@@ -128,3 +130,4 @@ open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
 - Long recordings must be wrapped in `caffeinate -s` to prevent Mac sleep.
 - LauncherApp persists `~/.script_launcher_dev.json` (with `.bak` backup), logs to `~/.script_logs_dev` (7-day cleanup, 20-entry history cap). The `_dev` suffix isolates the dev launcher from the legacy launcher's `~/.script_launcher.json` / `~/.script_logs` (see `StoragePaths` in StateStore.swift).
 - Missing ffmpeg must degrade gracefully (catch `FileNotFoundError`, warn, continue) — never hard-fail.
+- LauncherApp tasks launched with the 翻译为中文 checkbox need `DEEPSEEK_API_KEY` in the environment of the app's parent process, because TaskManager spawns children inheriting the parent environment. Set it via `export` in the shell profile, or `launchctl setenv DEEPSEEK_API_KEY <key>` for Finder/launchd launches; otherwise the translate step fails with `[ERR]`.
