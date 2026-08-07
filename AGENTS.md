@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Japanese TV/radio recording and subtitle extraction toolset (macOS). 5 standalone Python CLI scripts flat in the repo root, plus a native Swift menu-bar launcher — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright), external deps ffmpeg, Playwright chromium, caffeinate, Xcode CLT (for `swift build`).
+Japanese TV/radio recording and subtitle extraction toolset (macOS). 6 standalone Python CLI scripts flat in the repo root, plus a native Swift menu-bar launcher — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright), external deps ffmpeg, Playwright chromium, caffeinate, Xcode CLT (for `swift build`).
 
 ## STRUCTURE
 
@@ -11,6 +11,7 @@ script/
 ├── live_recorder_sub.py   # HLS recorder: TS video + VTT subtitles + SCTE35 ad skip; --subtitle-url explicit subtitle stream (low-level)
 ├── download_vtt.py        # VTT subtitle download/merge/convert to SRT (6 modes)
 ├── radiko_recorder.py     # radiko radio recording; --to-video + --image-dir convert to MP4 (standalone, no internal deps)
+├── srt_translate.py       # Japanese SRT → Chinese via DeepSeek API; needs DEEPSEEK_API_KEY (standalone)
 ├── LauncherApp/           # native macOS menu-bar GUI (Swift/AppKit), schedules the scripts above
 │   ├── Package.swift      # SwiftPM manifest (swift-subprocess 0.5, macOS 13+)
 │   ├── Sources/LauncherApp/  # 18 .swift files (AppDelegate, TaskManager, MenuBuilder, AlertPresenter, RestartSupport, ...)
@@ -31,6 +32,7 @@ script/
 | Parallel past-window ID scan | `download_vtt.py`: no-playlist `phase2_forward` scan, 16-worker `ThreadPoolExecutor` (~line 1351) |
 | Ad-skip logic | `live_recorder_sub.py`: `AdTracker` (SCTE35 daterange parsing) |
 | radiko auth | `radiko_recorder.py`: `RadikoAuth` (auth1/auth2) |
+| SRT translation | `srt_translate.py`: `parse_srt_lines` / `split_into_blocks` / `build_prompt` / `call_deepseek` / `translate_all` / `assemble_srt` |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
 | GUI scheduling / persistence | `LauncherApp/Sources/LauncherApp/AppDelegate.swift` (lifecycle + 5s rebuild) + `TaskManager.swift` (spawn/stop) + `StateStore.swift` (JSON state) |
 
@@ -49,6 +51,12 @@ script/
 | `SubtitleDownloader` | class | live_recorder_sub.py:559 | VTT segment download + time correction + SRT |
 | `RadikoAuth` | class | radiko_recorder.py:49 | auth1/auth2 authentication + encrypted headers |
 | `RadikoRecorder` | class | radiko_recorder.py:134 | AAC segment download + merge |
+| `parse_srt_lines` | function | srt_translate.py:57 | Split SRT into (kind, content, terminator) records, byte-identical reassembly |
+| `split_into_blocks` | function | srt_translate.py:86 | Split text lines into consecutive blocks of block_size |
+| `build_prompt` | function | srt_translate.py:91 | Build the (system, user) prompt pair for a translation block |
+| `call_deepseek` | function | srt_translate.py:116 | DeepSeek chat-completions POST; retries 429/5xx, AuthError on 401 |
+| `translate_all` | function | srt_translate.py:250 | ThreadPoolExecutor block translation, ordered by text ordinal, stop flag |
+| `assemble_srt` | function | srt_translate.py:295 | Reassemble SRT with translated text substituted in place |
 | `AppDelegate` | class | LauncherApp/Sources/LauncherApp/AppDelegate.swift | NSStatusItem app lifecycle + 5s menu rebuild |
 | `TaskManager` | enum | LauncherApp/Sources/LauncherApp/TaskManager.swift | Task spawn + log redirection + termination chain (swift-subprocess) |
 | `MenuBuilder` | enum | LauncherApp/Sources/LauncherApp/MenuBuilder.swift | Status-menu tree (parity with the legacy rumps GUI) |
@@ -105,6 +113,7 @@ uv sync
 caffeinate -s .venv/bin/python tver_wrapper.py --tver-page https://tver.jp/live/tbs --start-at 18:00 -d 115 -o out.mp4
 .venv/bin/python download_vtt.py --tver-page https://tver.jp/live/tbs --time-start 20:00 --time-end 21:00
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
+DEEPSEEK_API_KEY=sk-... .venv/bin/python srt_translate.py input.srt   # requires an API key (env or --api-key)
 cd LauncherApp && swift build           # build the menu-bar GUI
 cd LauncherApp && ./scripts/package.sh  # package into dist/LauncherApp.app (ad-hoc signed); must be re-run after any Swift change to update the shipped dist
 open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon

@@ -20,6 +20,7 @@ tver_wrapper.py  ──→  tver_fetch_url.py  +  live_recorder_sub.py
 download_vtt.py  ──→  tver_fetch_url.py (--tver-page mode only)
                        ffmpeg (VTT→SRT)
 radiko_recorder.py    (standalone, no internal dependencies)
+srt_translate.py      (standalone, DeepSeek API)
 LauncherApp/     ──→  tver_wrapper.py / download_vtt.py / radiko_recorder.py
                       (macOS menu-bar GUI, section 6)
 ```
@@ -225,6 +226,39 @@ TVer presets store the 结束时间 value as `end_time` alongside the computed d
 
 ---
 
+## 7. srt_translate.py — SRT Subtitle Translation to Chinese (DeepSeek API)
+
+Translates a Japanese SRT subtitle file into Chinese via the DeepSeek chat-completions API. Only subtitle text lines are translated; sequence numbers, timestamps, and blank lines are reassembled byte-identically (original line endings preserved). The output defaults to the input path with "中" inserted before the extension, so `260804.srt` becomes `260804中.srt` in the same directory.
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `input` | str (positional) | Input SRT file path |
+| `-o, --output` | str | Output file path; defaults to input name with "中" before the extension |
+| `--model` | str (default `deepseek-v4-flash`) | DeepSeek model name |
+| `--block-size` | int (default 100) | Text lines sent per translation batch |
+| `-c, --concurrency` | int (default 4) | Number of concurrent translation batches |
+| `--temperature` | float (default 0.2) | Sampling temperature |
+| `--api-key` | str | DeepSeek API key; overrides the `DEEPSEEK_API_KEY` env var |
+| `--base-url` | str (default `https://api.deepseek.com`) | DeepSeek API base URL |
+| `--max-retries` | int (default 3) | Max retries per request on failure |
+
+This is the first script that requires an API key. Provide it via the `DEEPSEEK_API_KEY` environment variable or the `--api-key` flag. The key is a secret and must never be committed (see `.gitignore`).
+
+```bash
+# Set the key first (alternatively pass --api-key)
+export DEEPSEEK_API_KEY="sk-your-key"
+
+# Translate; output lands in the same dir as 260804中.srt
+.venv/bin/python srt_translate.py 260804.srt
+
+# Faster: 8 concurrent batches of 50 lines each
+.venv/bin/python srt_translate.py 260804.srt -c 8 --block-size 50
+```
+
+Exit code is 0 on success, even when some blocks fall back to the original text (each fallback logs `[WARN]`). Exit code is 1 on fatal errors: missing API key, missing input file, `-o` equal to the input, or undecodable input bytes.
+
+---
+
 ## Typical Workflows
 
 **Schedule a TVer program recording**
@@ -244,6 +278,12 @@ caffeinate -s .venv/bin/python tver_wrapper.py \
 **Record a radiko broadcast**
 ```bash
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
+```
+
+**Translate a subtitle file into Chinese**
+```bash
+export DEEPSEEK_API_KEY="sk-your-key"
+.venv/bin/python srt_translate.py tbs.srt
 ```
 
 ## Notes
