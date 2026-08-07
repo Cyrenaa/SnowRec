@@ -14,7 +14,8 @@ script/
 ├── srt_translate.py       # Japanese SRT → Chinese via DeepSeek API; needs DEEPSEEK_API_KEY (standalone)
 ├── LauncherApp/           # native macOS menu-bar GUI (Swift/AppKit), schedules the scripts above
 │   ├── Package.swift      # SwiftPM manifest (swift-subprocess 0.5, macOS 13+)
-│   ├── Sources/LauncherApp/  # 18 .swift files (AppDelegate, TaskManager, MenuBuilder, AlertPresenter, RestartSupport, ...)
+│   ├── Sources/LauncherApp/  # 19 .swift files (AppDelegate, TaskManager, MenuBuilder, AlertPresenter, RestartSupport, KeyStore, ...)
+│   │   └── KeyStore.swift    # DeepSeek API key file I/O (~/.script_launcher_dev.key, 0600, HOME-scoped)
 │   └── scripts/package.sh # assembles dist/LauncherApp.app (ad-hoc signed)
 ├── pyproject.toml         # uv project metadata (no build-system); deps locked in uv.lock
 ├── README.md              # the only authoritative doc: all CLI args and usage
@@ -36,6 +37,7 @@ script/
 | `--translate` wiring | `download_vtt.py`: `run_translate` (~line 387) + `TRANSLATE_SCRIPT` (~line 1512); `tver_wrapper.py`: `run_translate` (~line 37) + `TRANSLATE_SCRIPT` (line 29); LauncherApp: `CommandBuilder` translate params + `DialogFlows`/`PresetFlows` 翻译为中文 checkbox |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
 | GUI scheduling / persistence | `LauncherApp/Sources/LauncherApp/AppDelegate.swift` (lifecycle + 5s rebuild) + `TaskManager.swift` (spawn/stop) + `StateStore.swift` (JSON state) |
+| DeepSeek key config | `LauncherApp/Sources/LauncherApp/KeyStore.swift`: load/save/clear `~/.script_launcher_dev.key` (0600); `TaskManager.swift`: inject into spawned task env only when the app env lacks it |
 
 ## CODE MAP
 
@@ -72,6 +74,7 @@ script/
 | `HistoryFlows` | enum | LauncherApp/Sources/LauncherApp/HistoryFlows.swift | Task-info + history detail / rerun / clear |
 | `RestartSupport` | enum | LauncherApp/Sources/LauncherApp/RestartSupport.swift | App relaunch: bundle-mode `NSWorkspace.open` / reexec via `posix_spawn` + `POSIX_SPAWN_SETSID` |
 | `AlertPresenter` | enum | LauncherApp/Sources/LauncherApp/AlertPresenter.swift | Centralized `NSAlert` modal presentation (activates app first; never bare `runModal`) |
+| `KeyStore` | class | LauncherApp/Sources/LauncherApp/KeyStore.swift | Load/save/clear DeepSeek key in `~/.script_launcher_dev.key` (0600, HOME-scoped) |
 
 Call chain: `LauncherApp → {tver_wrapper, download_vtt, radiko_recorder}`; `tver_wrapper → tver_fetch_url → live_recorder_sub`; `download_vtt → tver_fetch_url`. Scripts talk via `subprocess.run([sys.executable, ...])` + `--json` stdout protocol.
 
@@ -130,4 +133,4 @@ open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
 - Long recordings must be wrapped in `caffeinate -s` to prevent Mac sleep.
 - LauncherApp persists `~/.script_launcher_dev.json` (with `.bak` backup), logs to `~/.script_logs_dev` (7-day cleanup, 20-entry history cap). The `_dev` suffix isolates the dev launcher from the legacy launcher's `~/.script_launcher.json` / `~/.script_logs` (see `StoragePaths` in StateStore.swift).
 - Missing ffmpeg must degrade gracefully (catch `FileNotFoundError`, warn, continue) — never hard-fail.
-- LauncherApp tasks launched with the 翻译为中文 checkbox need `DEEPSEEK_API_KEY` in the environment of the app's parent process, because TaskManager spawns children inheriting the parent environment. Set it via `export` in the shell profile, or `launchctl setenv DEEPSEEK_API_KEY <key>` for Finder/launchd launches; otherwise the translate step fails with `[ERR]`.
+- LauncherApp tasks launched with the 翻译为中文 checkbox need `DEEPSEEK_API_KEY`. TaskManager spawns children inheriting the parent environment, and injects the key from the config file (`~/.script_launcher_dev.key`, 0600, HOME-scoped, `_dev`-isolated) ONLY when the app's own environment lacks it, so a shell/launchctl `DEEPSEEK_API_KEY` always wins over the config file. Set the key once via the 设置 DeepSeek API Key... menu item (or write the file manually), or `export` it in the shell profile / `launchctl setenv DEEPSEEK_API_KEY <key>` for Finder/launchd launches. Inside `srt_translate.py` precedence is `--api-key` > env `DEEPSEEK_API_KEY` > error. The key is never committed or printed; the `--dump-key-status` QA flag reports only `keySource=env|config|none`. A task started with the checkbox and no key still fails with `[ERR]`.
