@@ -75,6 +75,9 @@ enum MenuBuilder {
         }
         menu.addItem(parentItem("最近", submenu: historyMenu))
 
+        // DeepSeek API key settings (wired in AppDelegate.attachMenuActions).
+        menu.addItem(disabledItem("设置 DeepSeek API Key..."))
+
         // Stop-all + restart + quit (launcher.py:299-304).
         menu.addItem(.separator())
         if !active.isEmpty {

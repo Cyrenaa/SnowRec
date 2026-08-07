@@ -124,6 +124,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let submenu = item.submenu {
                     attachHistoryActions(to: submenu)
                 }
+            case "设置 DeepSeek API Key...":
+                item.target = self
+                item.action = #selector(setDeepSeekKeyAction)
+                item.isEnabled = true
             case "停止全部":
                 // launcher.py:301 callback; only present when active tasks
                 // exist (MenuBuilder is already conditional).
@@ -259,6 +263,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func clearHistoryAction() {
         HistoryFlows.clearHistory()
+    }
+
+    // MARK: - DeepSeek API key action
+
+    /// Shows the secure key entry dialog, then persists via KeyStore
+    /// (HOME-scoped ~/.script_launcher_dev.key, 0600).
+    @objc private func setDeepSeekKeyAction() {
+        let alert = NSAlert()
+        alert.messageText = "设置 DeepSeek API Key"
+        alert.informativeText = "保存到 ~/.script_launcher_dev.key (0600 权限)。留空确认将清除已保存的 Key。"
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+        let field = NSSecureTextField(string: KeyStore.load() ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] ?? "")
+        field.placeholderString = "sk-..."
+        let grid = NSGridView(views: [[NSTextField(labelWithString: "API Key:"), field]])
+        grid.rowSpacing = 8
+        grid.columnSpacing = 12
+        grid.column(at: 1).xPlacement = .fill
+        grid.column(at: 1).width = 240
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
+        alert.accessoryView = grid
+        guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
+        KeyStore.save(field.stringValue)
     }
 
     // MARK: - Stop-all / quit actions (launcher.py:301-303)
