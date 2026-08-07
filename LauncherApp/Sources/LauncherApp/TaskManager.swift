@@ -86,6 +86,13 @@ enum TaskManager {
         }
     }
 
+    /// DeepSeek key for spawned tasks: the app's own environment wins; the
+    /// KeyStore config file is the fallback (Finder/launchd launches inherit no shell env).
+    static func resolvedDeepSeekKey(processEnv: [String: String]) -> String? {
+        if processEnv["DEEPSEEK_API_KEY"] != nil { return nil }
+        return KeyStore.load()
+    }
+
     /// launcher.py:116-163 `Task.start()`: create the log file (or degrade
     /// to DEVNULL), spawn with the Homebrew-prepended PATH in the repo
     /// root, record pid+log, wait for exit, record the final status. Never
@@ -137,10 +144,20 @@ enum TaskManager {
         var platformOptions = PlatformOptions()
         platformOptions.createSession = true  // pid == pgid (launcher.py:139)
 
+        // DeepSeek key for spawned tasks: the app's own environment wins; the
+        // KeyStore config file is the fallback (Finder/launchd launches
+        // inherit no shell env). Environment.updating takes [Key: String?],
+        // so the chained literal calls (as written) avoid a
+        // [String: String] -> [Key: String?] conversion.
+        var environment = Environment.inherit.updating(["PATH": path])
+        if let key = resolvedDeepSeekKey(processEnv: ProcessInfo.processInfo.environment) {
+            environment = environment.updating(["DEEPSEEK_API_KEY": key])
+        }
+
         let config = Configuration(
             executable: .name(task.cmd.first ?? "caffeinate"),
             arguments: Arguments(Array(task.cmd.dropFirst())),
-            environment: .inherit.updating(["PATH": path]),
+            environment: environment,
             workingDirectory: FilePath(repoRoot),
             platformOptions: platformOptions
         )

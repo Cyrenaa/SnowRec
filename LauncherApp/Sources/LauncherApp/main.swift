@@ -224,6 +224,155 @@ if CommandLine.arguments.contains("--spawn-test") {
     exit(0)
 }
 
+// --key-store-test: exercise the REAL KeyStore file round-trip in the
+// HOME sandbox: save("sk-test-key") -> load() == "sk-test-key";
+// save("  padded  ") -> load() == "padded" (trimmed); save("") -> load()
+// == nil (file cleared); re-save("sk-test-key") -> the file's
+// posixPermissions == 0o600; clear() -> load() == nil. Prints
+// keyStoreTest=pass (exit 0) or keyStoreTest=fail:<reason> (exit 1).
+// No GUI, no SNOWREC_ROOT needed (only HOME).
+if CommandLine.arguments.contains("--key-store-test") {
+    func fail(_ reason: String) -> Never {
+        print("keyStoreTest=fail:\(reason)")
+        exit(1)
+    }
+    KeyStore.save("sk-test-key")
+    if KeyStore.load() != "sk-test-key" {
+        fail("save-load roundtrip")
+    }
+    KeyStore.save("  padded  ")
+    if KeyStore.load() != "padded" {
+        fail("whitespace trim")
+    }
+    KeyStore.save("")
+    if KeyStore.load() != nil {
+        fail("empty save did not clear")
+    }
+    KeyStore.save("sk-test-key")
+    let perms = (try? FileManager.default.attributesOfItem(
+        atPath: KeyStore.path().path)[.posixPermissions] as? NSNumber)?.intValue
+    if perms != 0o600 {
+        fail("permissions \(String(describing: perms)) != 0600")
+    }
+    KeyStore.clear()
+    if KeyStore.load() != nil {
+        fail("clear did not remove key")
+    }
+    print("keyStoreTest=pass")
+    exit(0)
+}
+
+// --env-inject-test <unit|spawn>: QA of the DEEPSEEK_API_KEY injection.
+//   unit  — pure precedence via TaskManager.resolvedDeepSeekKey: empty env
+//           + no config -> nil (noConfigNoInject); empty env + seeded
+//           config -> the key (configInjected); env carrying
+//           DEEPSEEK_API_KEY -> nil (envWins); after clear -> nil
+//           (cleared). All four pass -> injectUnitTest=pass, exit 0.
+//   spawn — end-to-end: seed KeyStore with "sk-env-inject-test", spawn
+//           `python3 -c "import os;print('DEEPSEEK_API_KEY='+...)"`
+//           through the REAL TaskManager path (mirror of --spawn-test),
+//           assert the log contains DEEPSEEK_API_KEY=sk-env-inject-test.
+//           Prints injectSpawn=pass (exit 0) or injectSpawn=fail:<reason>
+//           (exit 1). Requires SNOWREC_ROOT (spawns); the caller must run
+//           with `env -u DEEPSEEK_API_KEY` so the injected key is the
+//           KeyStore fallback, never the parent env.
+if CommandLine.arguments.contains("--env-inject-test") {
+    let args = CommandLine.arguments
+    guard let flagIndex = args.firstIndex(of: "--env-inject-test"),
+          flagIndex + 1 < args.count,
+          !args[flagIndex + 1].hasPrefix("--") else {
+        FileHandle.standardError.write(
+            Data("--env-inject-test usage: --env-inject-test <unit|spawn>\n".utf8))
+        exit(1)
+    }
+    let mode = args[flagIndex + 1]
+    switch mode {
+    case "unit":
+        KeyStore.clear()
+        var pass = true
+        if TaskManager.resolvedDeepSeekKey(processEnv: [:]) != nil {
+            print("noConfigNoInject=fail"); pass = false
+        } else {
+            print("noConfigNoInject=pass")
+        }
+        KeyStore.save("sk-unit-key")
+        if TaskManager.resolvedDeepSeekKey(processEnv: [:]) != "sk-unit-key" {
+            print("configInjected=fail"); pass = false
+        } else {
+            print("configInjected=pass")
+        }
+        if TaskManager.resolvedDeepSeekKey(
+            processEnv: ["DEEPSEEK_API_KEY": "sk-parent-key"]) != nil {
+            print("envWins=fail"); pass = false
+        } else {
+            print("envWins=pass")
+        }
+        KeyStore.clear()
+        if TaskManager.resolvedDeepSeekKey(processEnv: [:]) != nil {
+            print("cleared=fail"); pass = false
+        } else {
+            print("cleared=pass")
+        }
+        print(pass ? "injectUnitTest=pass" : "injectUnitTest=fail")
+        exit(pass ? 0 : 1)
+    case "spawn":
+        guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+              !root.isEmpty else {
+            FileHandle.standardError.write(
+                Data("--env-inject-test spawn requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+            exit(1)
+        }
+        KeyStore.save("sk-env-inject-test")
+        let store = StateStore()
+        let name = "env-inject-test"
+        let cmd = [
+            "caffeinate", CommandBuilder.pythonPath(repoRoot: root),
+            "-c",
+            "import os;print('DEEPSEEK_API_KEY='+os.environ.get('DEEPSEEK_API_KEY','none'))",
+        ]
+        let task = Task(name: name, cmd: cmd)
+        var state = store.load()
+        let entry = HistoryEntry(label: name, cmd: cmd, status: "运行中", pid: nil, log: nil)
+        state.history.insert(entry, at: 0)
+        task.historyEntry = entry
+        store.save(state)
+
+        let result = await TaskManager.start(task, store: store)
+
+        var logText = ""
+        if let logPath = result.logPath {
+            logText = (try? String(contentsOf: URL(fileURLWithPath: logPath), encoding: .utf8)) ?? ""
+        }
+        if logText.contains("DEEPSEEK_API_KEY=sk-env-inject-test") {
+            print("injectSpawn=pass")
+            exit(0)
+        }
+        FileHandle.standardError.write(
+            Data("--env-inject-test spawn: log missing injected key (log: \(result.logPath ?? "nil"))\n".utf8))
+        print("injectSpawn=fail")
+        exit(1)
+    default:
+        FileHandle.standardError.write(
+            Data("--env-inject-test: unknown mode '\(mode)'\n".utf8))
+        exit(1)
+    }
+}
+
+// --dump-key-status: print exactly one line `keySource=env|config|none` —
+// non-empty process env DEEPSEEK_API_KEY -> env; else KeyStore.load() !=
+// nil -> config; else none. NEVER prints the key value. Exit 0, no GUI.
+if CommandLine.arguments.contains("--dump-key-status") {
+    if let envKey = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"],
+       !envKey.isEmpty {
+        print("keySource=env")
+    } else if KeyStore.load() != nil {
+        print("keySource=config")
+    } else {
+        print("keySource=none")
+    }
+    exit(0)
+}
+
 // --termination-test: spawn a long-running payload (sleep 60), let it run
 // 2 seconds, then stop it through TaskManager.stop (SIGTERM -> 5s -> SIGKILL
 // to the process group) and print {"pid":..., "stopped":true}. QA then
