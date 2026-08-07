@@ -9,6 +9,10 @@ __pycache__/
 # opencode 会话状态（勿提交）
 .omo/
 
+# API keys
+.env
+.env.*
+
 # macOS
 .DS_Store
 
