@@ -27,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// whether a status item exists (QA flags read it without a GUI).
     private(set) var currentMenu: NSMenu?
 
+    /// Retained target for the key-dialog 显示明文 toggle (target/action
+    /// holds no strong reference). Cleared after the modal session.
+    private var keyFieldToggler: AnyObject?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Notification delegate installed early (idempotent) so foreground
         // banners can be presented by todo 23.
@@ -276,9 +280,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "确认")
         alert.addButton(withTitle: "取消")
         alert.buttons[1].keyEquivalent = "\u{1b}"
-        let field = NSSecureTextField(string: KeyStore.load() ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] ?? "")
-        field.placeholderString = "sk-..."
-        let grid = NSGridView(views: [[NSTextField(labelWithString: "API Key:"), field]])
+        let initialKey = KeyStore.load() ?? ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] ?? ""
+        let secureField = NSSecureTextField(string: initialKey)
+        secureField.placeholderString = "sk-..."
+        // Secure fields hide the text and disable selection-copy; the
+        // 显示明文 toggle swaps in a plain NSTextField (same frame) so the
+        // key can be reviewed / selected / copied when needed.
+        let plainField = NSTextField(string: initialKey)
+        plainField.isHidden = true
+        let fieldFrame = NSRect(x: 0, y: 0, width: 240, height: secureField.fittingSize.height)
+        let fieldContainer = NSView(frame: fieldFrame)
+        secureField.frame = fieldFrame
+        plainField.frame = fieldFrame
+        fieldContainer.addSubview(secureField)
+        fieldContainer.addSubview(plainField)
+        let showToggle = NSButton(checkboxWithTitle: "显示明文", target: nil, action: nil)
+        let toggler = SecureFieldToggler(secure: secureField, plain: plainField)
+        keyFieldToggler = toggler  // retained for the modal session
+        showToggle.target = toggler
+        showToggle.action = #selector(SecureFieldToggler.toggle(_:))
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: "API Key:"), fieldContainer],
+            [NSTextField(labelWithString: ""), showToggle],
+        ])
         grid.rowSpacing = 8
         grid.columnSpacing = 12
         grid.column(at: 1).xPlacement = .fill
@@ -287,7 +311,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
         alert.accessoryView = grid
         guard AlertPresenter.presentModal(alert) == .alertFirstButtonReturn else { return }
-        KeyStore.save(field.stringValue)
+        keyFieldToggler = nil
+        let finalKey = plainField.isHidden ? secureField.stringValue : plainField.stringValue
+        KeyStore.save(finalKey)
     }
 
     // MARK: - Stop-all / quit actions (launcher.py:301-303)
@@ -348,5 +374,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the relaunch.
         StateStore().save(StateStore().load())
         RestartSupport.performRestart()
+    }
+}
+
+/// Swaps an NSSecureTextField with a plain NSTextField via the 显示明文
+/// checkbox in the key dialog, so the stored key can be reviewed or
+/// selected/copied when needed. Keeps both fields' values in sync.
+private final class SecureFieldToggler: NSObject {
+    private weak var secure: NSSecureTextField?
+    private weak var plain: NSTextField?
+
+    init(secure: NSSecureTextField, plain: NSTextField) {
+        self.secure = secure
+        self.plain = plain
+    }
+
+    @objc func toggle(_ sender: NSButton) {
+        let showPlain = (sender.state == .on)
+        if showPlain {
+            plain?.stringValue = secure?.stringValue ?? ""
+        } else {
+            secure?.stringValue = plain?.stringValue ?? ""
+        }
+        plain?.isHidden = !showPlain
+        secure?.isHidden = showPlain
     }
 }
