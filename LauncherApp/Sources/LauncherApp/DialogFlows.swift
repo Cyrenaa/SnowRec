@@ -124,6 +124,17 @@ enum DialogFlows {
             outputInitial: "tbs.mp4")
     }
 
+    /// Internal QA hook: builds the REAL youtube-flow alert — the exact same
+    /// makeUrlAlert construction as newYouTube (URL row, no popup) — WITHOUT
+    /// running the modal, so a probe can verify its construction.
+    static func youtubeAlert() -> TaskAlertContent {
+        makeUrlAlert(
+            title: "YouTube 直播录制",
+            startLabel: "开始时间 (HH:MM):", startDefault: "",
+            secondLabel: "录制时长 (分钟):", secondDefault: "30",
+            outputInitial: "youtube.mp4")
+    }
+
     /// launcher.py:493-520 `_new_recording`.
     static func newTver(delegate: AppDelegate) {
         let content = makeTaskAlert(
@@ -169,6 +180,39 @@ enum DialogFlows {
             repoRoot: RepoRoot.resolveRepoRoot() ?? "", input: path)
         let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
         let name = "翻译 \(base)"
+        return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
+    }
+
+    /// Menu item 其他功能 → YouTube 直播录制: URL dialog (empty URL = cancel),
+    /// then startYouTube spawns youtube_recorder.py. Menu-only task (no preset type).
+    static func newYouTube(delegate: AppDelegate) {
+        let content = makeUrlAlert(
+            title: "YouTube 直播录制",
+            startLabel: "开始时间 (HH:MM):", startDefault: "",
+            secondLabel: "录制时长 (分钟):", secondDefault: "30",
+            outputInitial: "youtube.mp4")
+        guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
+
+        let url = trimmed(urlValue(content))
+        let startAt = trimmed(content.startField.stringValue)
+        let duration = trimmed(content.secondField.stringValue)
+        let output = trimmed(content.outputField.stringValue)
+        guard !url.isEmpty else {
+            return  // empty URL == cancel
+        }
+        startYouTube(delegate: delegate, url: url, startAt: startAt, duration: duration, output: output)
+    }
+
+    @discardableResult
+    static func startYouTube(
+        delegate: AppDelegate, url: String,
+        startAt: String, duration: String, output: String
+    ) -> Task {
+        let cmd = CommandBuilder.youTubeCommand(
+            repoRoot: RepoRoot.resolveRepoRoot() ?? "",
+            url: url, startAt: startAt, duration: duration, output: output)
+        let displayURL = url.count > 50 ? String(url.prefix(50)) + "…" : url
+        let name = "YouTube \(displayURL)"
         return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
     }
 
@@ -352,6 +396,51 @@ enum DialogFlows {
             outputField: outputField, checkbox: checkbox)
     }
 
+    /// makeTaskAlert analog for URL-input flows (YouTube live recording):
+    /// the same 4-row grid but row 1 is a URL text field instead of the
+    /// popup. TaskAlertContent is UNCHANGED (Metis #6) — the non-optional
+    /// popup param gets a DUMMY empty NSPopUpButton that is never added to
+    /// the grid; the URL field has no slot either, so newYouTube reads it
+    /// back from the accessory grid (urlValue).
+    private static func makeUrlAlert(
+        title: String,
+        startLabel: String, startDefault: String,
+        secondLabel: String, secondDefault: String,
+        outputInitial: String
+    ) -> TaskAlertContent {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.alertStyle = .informational
+        alert.icon = snowflakeIcon()
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消")
+        alert.buttons[1].keyEquivalent = "\u{1b}"
+
+        let urlField = NSTextField(string: "")
+        let startField = NSTextField(string: startDefault)
+        let secondField = NSTextField(string: secondDefault)
+        let outputField = NSTextField(string: outputInitial)
+
+        let grid = NSGridView(views: [
+            [label("URL:"), urlField],
+            [label(startLabel), startField],
+            [label(secondLabel), secondField],
+            [label("输出文件名:"), outputField],
+        ])
+        grid.rowSpacing = 8
+        grid.columnSpacing = 12
+        grid.column(at: 1).xPlacement = .fill
+        grid.column(at: 1).width = 200
+        let fitting = grid.fittingSize
+        grid.frame = NSRect(x: 0, y: 0, width: fitting.width, height: fitting.height)
+        alert.accessoryView = grid
+
+        return TaskAlertContent(
+            alert: alert, popup: NSPopUpButton(),
+            startField: startField, secondField: secondField,
+            outputField: outputField, checkbox: nil)
+    }
+
     /// Grid cell label: right-aligned, non-editable.
     private static func label(_ text: String) -> NSTextField {
         let field = NSTextField(labelWithString: text)
@@ -376,6 +465,19 @@ enum DialogFlows {
 
     private static func trimmed(_ text: String) -> String {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Reads the URL flow's URL input (row 0, column 1 of the accessory
+    /// grid). The URL field has no dedicated TaskAlertContent slot (the
+    /// class is unchanged, Metis #6), so it is read back from the grid it
+    /// lives in.
+    private static func urlValue(_ content: TaskAlertContent) -> String {
+        guard let grid = content.alert.accessoryView as? NSGridView,
+              grid.numberOfRows > 0,
+              let field = grid.cell(atColumnIndex: 1, rowIndex: 0).contentView as? NSTextField else {
+            return ""
+        }
+        return field.stringValue
     }
 
     /// Holds a flow alert's controls. `checkbox` is nil only for the tver

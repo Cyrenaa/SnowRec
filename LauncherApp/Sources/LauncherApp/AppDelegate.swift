@@ -240,6 +240,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DialogFlows.newTranslate(delegate: self)
     }
 
+    @objc private func newYouTubeAction() {
+        DialogFlows.newYouTube(delegate: self)
+    }
+
     // MARK: - Preset actions (launcher.py:272-281)
 
     @objc private func savePresetAction() {

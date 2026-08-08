@@ -157,14 +157,33 @@ if CommandLine.arguments.contains("--dump-alert-content") {
     func state(_ button: NSButton?) -> String {
         button?.state == .on ? "on" : "off"
     }
+    // URL-flow alert: row 0 must be a URL text row (label "URL:" in column 0,
+    // an NSTextField — NOT a popup — in column 1) and the checkbox is nil.
+    func row0Label(_ content: DialogFlows.TaskAlertContent) -> String {
+        guard let grid = content.alert.accessoryView as? NSGridView,
+              let field = grid.cell(atColumnIndex: 0, rowIndex: 0).contentView as? NSTextField else {
+            return "-"
+        }
+        return field.stringValue
+    }
+    func row0IsTextField(_ content: DialogFlows.TaskAlertContent) -> Bool {
+        guard let grid = content.alert.accessoryView as? NSGridView else { return false }
+        return grid.cell(atColumnIndex: 1, rowIndex: 0).contentView is NSTextField
+    }
     let subtitle = DialogFlows.subtitleAlert()
     print("subtitle=\(subtitle.checkbox?.title ?? "-"):\(state(subtitle.checkbox))")
     let tver = DialogFlows.tverAlert()
     print("tver=\(tver.checkbox.map { "\($0.title):\(state($0))" } ?? "-")")
     let radio = DialogFlows.radioAlert()
     print("radio=\(radio.checkbox?.title ?? "-"):\(state(radio.checkbox))")
+    let youtube = DialogFlows.youtubeAlert()
+    print("youtubeRow0Label=\(row0Label(youtube))")
+    print("youtubeRow0TextField=\(row0IsTextField(youtube))")
+    print("youtube=\(youtube.checkbox.map { "\($0.title):\(state($0))" } ?? "-")")
     let pass = subtitle.checkbox?.title == "历史字幕" && tver.checkbox == nil
         && radio.checkbox?.title == "转换为视频"
+        && youtube.checkbox == nil
+        && row0Label(youtube) == "URL:" && row0IsTextField(youtube)
     print("alertContentAssert=\(pass ? "pass" : "fail")")
     exit(pass ? 0 : 1)
 }
@@ -535,7 +554,7 @@ if CommandLine.arguments.contains("--flow-test") {
           flagIndex + 1 < args.count,
           !args[flagIndex + 1].hasPrefix("--") else {
         FileHandle.standardError.write(
-            Data("--flow-test usage: --flow-test <radio|tver|subtitle> [--cancel]\n".utf8))
+            Data("--flow-test usage: --flow-test <radio|tver|subtitle|youtube> [--cancel]\n".utf8))
         exit(1)
     }
     let flowName = args[flagIndex + 1]
@@ -568,9 +587,13 @@ if CommandLine.arguments.contains("--flow-test") {
         task = DialogFlows.startSubtitle(
             delegate: delegate, channel: "CX (富士)",
             timeStart: "19:00", timeEnd: "20:00", output: "sub_cx (富士)")
+    case "youtube":
+        task = DialogFlows.startYouTube(
+            delegate: delegate, url: "https://www.youtube.com/@NASA/live",
+            startAt: "", duration: "0.1", output: "youtube_qa.mp4")
     default:
         FileHandle.standardError.write(
-            Data("--flow-test: unknown flow '\(flowName)'\n".utf8))
+            Data("--flow-test: unknown flow '\(flowName)' (expected radio|tver|subtitle|youtube)\n".utf8))
         exit(1)
     }
 
