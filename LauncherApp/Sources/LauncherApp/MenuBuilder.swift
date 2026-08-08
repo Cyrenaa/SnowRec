@@ -41,6 +41,12 @@ enum MenuBuilder {
         for title in ["下载字幕", "录制广播", "录制 TVer", "翻译字幕"] {
             menu.addItem(disabledItem(title))
         }
+
+        // 其他功能 — extensible category (launcher parity: none; additive).
+        // Future features slot in as additional sub-items here.
+        let otherFeatures = NSMenu()
+        otherFeatures.addItem(disabledItem("YouTube 直播录制"))
+        menu.addItem(parentItem("其他功能", submenu: otherFeatures))
         menu.addItem(.separator())
 
         // 收藏 — preset entries listed FLAT on the top level (user's

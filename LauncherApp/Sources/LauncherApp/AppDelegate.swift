@@ -132,6 +132,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let submenu = item.submenu {
                     attachHistoryActions(to: submenu)
                 }
+            case "其他功能":
+                if let submenu = item.submenu {
+                    attachOtherFeaturesActions(to: submenu)
+                }
             case "设置 DeepSeek API Key...":
                 item.target = self
                 item.action = #selector(setDeepSeekKeyAction)
@@ -218,6 +222,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.target = self
                 item.action = #selector(rerunHistoryAction(_:))
                 item.isEnabled = true
+            }
+        }
+    }
+
+    /// Wires the 其他功能 submenu: YouTube 直播录制 → newYouTubeAction
+    /// (defined in DialogFlows flow, selector already exists from T5).
+    private func attachOtherFeaturesActions(to submenu: NSMenu) {
+        for item in submenu.items {
+            switch item.title {
+            case "YouTube 直播录制":
+                item.target = self
+                item.action = #selector(newYouTubeAction)
+                item.isEnabled = true
+            default:
+                break
             }
         }
     }
