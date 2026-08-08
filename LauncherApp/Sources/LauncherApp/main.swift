@@ -101,10 +101,49 @@ if CommandLine.arguments.contains("--dump-builders") {
     print("tver=\(json(tverCmd))")
     let translateCmd = CommandBuilder.translateCommand(repoRoot: root, input: "/tmp/test.srt")
     print("translate=\(json(translateCmd))")
+    let youtubeCmd = CommandBuilder.youTubeCommand(
+        repoRoot: root, url: "https://youtu.be/abc",
+        startAt: "21:00", duration: "30", output: "out.mp4")
+    print("youtube=\(json(youtubeCmd))")
     let unknownCmd = CommandBuilder.subtitleCommand(
         repoRoot: root, channel: "NOPE",
         timeStart: "19:00", timeEnd: "20:00", output: "x.srt")
     print("unknownChannel=\(json(unknownCmd))")
+    exit(0)
+}
+
+// --dump-youtube-builder: build the youTubeCommand arrays (youtube menu task)
+// on FIXED inputs and print them as JSON on labeled lines, mirroring
+// --dump-builders. Case 1 = all fields filled; case 2 = empty startAt
+// (omits the --start-at pair); case 3 = empty duration (omits the -d pair);
+// case 4 = both empty. Runs BEFORE the GUI; exits 0. Same dev-mode contract
+// as --dump-builders: requires SNOWREC_ROOT.
+if CommandLine.arguments.contains("--dump-youtube-builder") {
+    guard let root = ProcessInfo.processInfo.environment["SNOWREC_ROOT"],
+          !root.isEmpty else {
+        FileHandle.standardError.write(
+            Data("--dump-youtube-builder requires SNOWREC_ROOT env var (dev-mode contract)\n".utf8))
+        exit(1)
+    }
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.withoutEscapingSlashes]
+    func json(_ cmd: [String]) -> String {
+        (try? encoder.encode(cmd)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+    }
+    let url = "https://youtu.be/abc"
+    let output = "out.mp4"
+    let case1 = CommandBuilder.youTubeCommand(
+        repoRoot: root, url: url, startAt: "21:00", duration: "30", output: output)
+    print("youtube_case1=\(json(case1))")
+    let case2 = CommandBuilder.youTubeCommand(
+        repoRoot: root, url: url, startAt: "", duration: "30", output: output)
+    print("youtube_case2=\(json(case2))")
+    let case3 = CommandBuilder.youTubeCommand(
+        repoRoot: root, url: url, startAt: "21:00", duration: "", output: output)
+    print("youtube_case3=\(json(case3))")
+    let case4 = CommandBuilder.youTubeCommand(
+        repoRoot: root, url: url, startAt: "", duration: "", output: output)
+    print("youtube_case4=\(json(case4))")
     exit(0)
 }
 

@@ -118,4 +118,30 @@ enum CommandBuilder {
     static func translateCommand(repoRoot: String, input: String) -> [String] {
         ["caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/srt_translate.py", input]
     }
+
+    // MARK: youtube (menu task — youtube_recorder.py)
+
+    /// Runs youtube_recorder.py on a YouTube live URL (其他功能 menu task).
+    /// Optional args are appended only when non-empty (parity with the GUI
+    /// form's optional fields).
+    static func youTubeCommand(
+        repoRoot: String,
+        url: String,
+        startAt: String,
+        duration: String,
+        output: String
+    ) -> [String] {
+        var cmd = [
+            "caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/youtube_recorder.py",
+            url,
+        ]
+        if !startAt.isEmpty {
+            cmd.append(contentsOf: ["--start-at", startAt])
+        }
+        if !duration.isEmpty {
+            cmd.append(contentsOf: ["-d", duration])
+        }
+        cmd.append(contentsOf: ["-o", output])
+        return cmd
+    }
 }
