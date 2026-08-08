@@ -105,8 +105,9 @@ def build_prompt(lines: list[str]) -> tuple[str, str]:
     numbered = "\n".join("%d. %s" % (i + 1, line) for i, line in enumerate(lines))
     user = (
         "请将下面每一行字幕逐行翻译为中文，并只返回一个 JSON 对象，"
-        '格式如下：{"translations": ["第1行翻译", "第2行翻译", ...]}\n'
-        "translations 数组中每个元素对应输入的一行，数量必须与输入行数完全一致。\n"
+        '格式如下：{"translations": {"1": "第1行翻译", "2": "第2行翻译"}}\n'
+        "translations 对象的键必须为行号（\"1\"、\"2\" ...），"
+        "与输入行一一对应，不能遗漏任何一行，也不能把多行合并成一条。\n"
         "输入行：\n"
         + numbered
     )
@@ -231,15 +232,44 @@ def translate_block(
                 time.sleep(1)
             continue
         translations = result.get("translations")
-        if (
-            isinstance(translations, list)
-            and len(translations) == len(lines)
-            and all(isinstance(t, str) for t in translations)
-        ):
-            return translations
-        got = len(translations) if isinstance(translations, list) else "none"
+        if isinstance(translations, dict):
+            # Keyed by line number ("1".."N"). A missing line keeps its
+            # original text instead of failing the whole block (models
+            # occasionally drop one line in long lists); only a severe
+            # miss beyond tolerance triggers a retry with feedback.
+            tolerance = max(2, len(lines) // 20)
+            missing = [
+                i
+                for i in range(1, len(lines) + 1)
+                if not isinstance(translations.get(str(i)), str)
+            ]
+            if len(missing) <= tolerance:
+                return [
+                    translations.get(str(i), line)
+                    for i, line in enumerate(lines, 1)
+                ]
+            got = sum(
+                1 for v in translations.values() if isinstance(v, str)
+            )
+            last_error = RuntimeError(
+                "翻译结果与输入行数差异过大 (expected %d, got %d 条有效)"
+                % (len(lines), got)
+            )
+            if attempt < max_retries - 1:
+                feedback = (
+                    "\n\n注意：上一次翻译结果与输入行数差异过大"
+                    "（需要 %d 行，只返回了 %d 行）。请重新逐行翻译，"
+                    "translations 的键必须为行号 1..%d，不能遗漏任何一行。"
+                    % (len(lines), got, len(lines))
+                )
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user + feedback},
+                ]
+                time.sleep(1)
+            continue
         last_error = RuntimeError(
-            "翻译结果数量与输入行数不一致 (expected %d, got %s)" % (len(lines), got)
+            "翻译结果格式不正确 (期望 translations 为按行号键控的对象)"
         )
         if attempt < max_retries - 1:
             time.sleep(1)
@@ -282,8 +312,13 @@ def translate_all(
                 # Auth failures are fatal: they never retry and must not be
                 # silently downgraded to "keep the original text".
                 raise
-            except Exception:
+            except Exception as exc:
                 # Keep the original text for this block (caller logs WARN).
+                print(
+                    "[%s] [WARN] 翻译块 %d 失败: %s"
+                    % (timestamp(), idx + 1, exc),
+                    file=sys.stderr,
+                )
                 result_lines = block
             # Spread each translation under its global text ordinal so
             # assemble_srt can map it back to the matching text record.
