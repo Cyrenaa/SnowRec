@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Japanese TV/radio recording and subtitle extraction toolset (macOS). 6 standalone Python CLI scripts flat in the repo root, plus a native Swift menu-bar launcher — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright), external deps ffmpeg, Playwright chromium, caffeinate, Xcode CLT (for `swift build`).
+Japanese TV/radio recording and subtitle extraction toolset (macOS). 7 standalone Python CLI scripts flat in the repo root, plus a native Swift menu-bar launcher — no package structure, no tests, no CI. Runtime: `.venv` (Python 3.14 + requests/m3u8/pycryptodome/playwright/yt-dlp), external deps ffmpeg, Playwright chromium, caffeinate, Xcode CLT (for `swift build`).
 
 ## STRUCTURE
 
@@ -12,11 +12,12 @@ script/
 ├── download_vtt.py        # VTT subtitle download/merge/convert to SRT (6 modes)
 ├── radiko_recorder.py     # radiko radio recording; --to-video + --image-dir convert to MP4 (standalone, no internal deps)
 ├── srt_translate.py       # Japanese SRT → Chinese via DeepSeek API; needs DEEPSEEK_API_KEY (standalone)
+├── youtube_recorder.py    # YouTube live recording via yt-dlp engine (standalone)
 ├── LauncherApp/           # native macOS menu-bar GUI (Swift/AppKit), schedules the scripts above
 │   ├── Package.swift      # SwiftPM manifest (swift-subprocess 0.5, macOS 13+)
 │   ├── Sources/LauncherApp/  # 19 .swift files (AppDelegate, TaskManager, MenuBuilder, AlertPresenter, RestartSupport, KeyStore, ...)
 │   │   └── KeyStore.swift    # DeepSeek API key file I/O (~/.script_launcher_dev.key, 0600, HOME-scoped)
-│   └── scripts/package.sh # assembles dist/LauncherApp.app (ad-hoc signed)
+│   └── scripts/package.sh # assembles dist/SnowRec.app (ad-hoc signed)
 ├── pyproject.toml         # uv project metadata (no build-system); deps locked in uv.lock
 ├── README.md              # the only authoritative doc: all CLI args and usage
 ├── .venv/                 # uv-created virtualenv (do not touch)
@@ -34,6 +35,7 @@ script/
 | Ad-skip logic | `live_recorder_sub.py`: `AdTracker` (SCTE35 daterange parsing) |
 | radiko auth | `radiko_recorder.py`: `RadikoAuth` (auth1/auth2) |
 | SRT translation | `srt_translate.py`: `parse_srt_lines` / `split_into_blocks` / `build_prompt` / `call_deepseek` / `translate_all` / `assemble_srt` |
+| YouTube live recording | `youtube_recorder.py` (yt-dlp engine, standalone) |
 | 翻译字幕 menu task wiring | LauncherApp: `CommandBuilder.translateCommand` (spawns `srt_translate.py`, output `<name>中.srt` next to input) + `DialogFlows.newTranslate`/`startTranslate` (NSOpenPanel SRT picker) + `MenuBuilder`/`AppDelegate` `newTranslateAction` (menu-only, not a preset type) |
 | Age popup / cookie handling | `tver_fetch_url.py`: `capture_manifest` (async, ~line 268) |
 | GUI scheduling / persistence | `LauncherApp/Sources/LauncherApp/AppDelegate.swift` (lifecycle + 5s rebuild) + `TaskManager.swift` (spawn/stop) + `StateStore.swift` (JSON state) |
@@ -61,6 +63,11 @@ script/
 | `translate_all` | function | srt_translate.py:250 | ThreadPoolExecutor block translation, ordered by text ordinal, stop flag |
 | `assemble_srt` | function | srt_translate.py:295 | Reassemble SRT with translated text substituted in place |
 | `translateCommand` | function | LauncherApp/Sources/LauncherApp/CommandBuilder.swift:118 | `caffeinate` + `.venv/bin/python srt_translate.py <input>`; output `<name>中.srt` next to the input |
+| `youTubeCommand` | function | LauncherApp/Sources/LauncherApp/CommandBuilder.swift:127 | `caffeinate` + `.venv/bin/python youtube_recorder.py <url>`; optional `--start-at`/`-d` appended only when non-empty |
+| `newYouTube` | function | LauncherApp/Sources/LauncherApp/DialogFlows.swift:188 | 其他功能 → YouTube 直播录制 URL dialog (empty URL = cancel) then `startYouTube` |
+| `startYouTube` | function | LauncherApp/Sources/LauncherApp/DialogFlows.swift:207 | Spawns `youtube_recorder.py` via `youTubeCommand`; task name `YouTube <url-truncated-50>` |
+| `makeUrlAlert` | function | LauncherApp/Sources/LauncherApp/DialogFlows.swift:405 | URL-text-field alert grid (no popup row; dummy NSPopUpButton for TaskAlertContent) |
+| `newYouTubeAction` | function | LauncherApp/Sources/LauncherApp/AppDelegate.swift:262 | `@objc` action wiring 其他功能 → YouTube 直播录制 → `DialogFlows.newYouTube` |
 | `AppDelegate` | class | LauncherApp/Sources/LauncherApp/AppDelegate.swift | NSStatusItem app lifecycle + 5s menu rebuild |
 | `TaskManager` | enum | LauncherApp/Sources/LauncherApp/TaskManager.swift | Task spawn + log redirection + termination chain (swift-subprocess) |
 | `MenuBuilder` | enum | LauncherApp/Sources/LauncherApp/MenuBuilder.swift | Status-menu tree (parity with the legacy rumps GUI) |
@@ -118,10 +125,11 @@ uv sync
 caffeinate -s .venv/bin/python tver_wrapper.py --tver-page https://tver.jp/live/tbs --start-at 18:00 -d 115 -o out.mp4
 .venv/bin/python download_vtt.py --tver-page https://tver.jp/live/tbs --time-start 20:00 --time-end 21:00
 .venv/bin/python radiko_recorder.py TBS -d 30 -o radio.m4a
+.venv/bin/python youtube_recorder.py https://www.youtube.com/@NASA/live -d 30 -o youtube.mp4
 DEEPSEEK_API_KEY=sk-... .venv/bin/python srt_translate.py input.srt   # requires an API key (env or --api-key)
 cd LauncherApp && swift build           # build the menu-bar GUI
-cd LauncherApp && ./scripts/package.sh  # package into dist/LauncherApp.app (ad-hoc signed); must be re-run after any Swift change to update the shipped dist
-open LauncherApp/dist/LauncherApp.app   # run the menu-bar GUI daemon
+cd LauncherApp && ./scripts/package.sh  # package into dist/SnowRec.app (ad-hoc signed); must be re-run after any Swift change to update the shipped dist
+open LauncherApp/dist/SnowRec.app   # run the menu-bar GUI daemon
 
 # No test / lint / build / CI commands
 ```

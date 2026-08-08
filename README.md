@@ -21,6 +21,7 @@ download_vtt.py  ──→  tver_fetch_url.py (--tver-page mode only)
                        ffmpeg (VTT→SRT)
 radiko_recorder.py    (standalone, no internal dependencies)
 srt_translate.py      (standalone, DeepSeek API)
+youtube_recorder.py   (standalone, yt-dlp)
 LauncherApp/     ──→  tver_wrapper.py / download_vtt.py / radiko_recorder.py
                       (macOS menu-bar GUI, section 6)
 ```
@@ -215,6 +216,7 @@ The app appears as a ❄️ status item in the menu bar (no Dock icon). State pe
 |------|-------------|
 | `📝 下载字幕` / `📻 录制广播` / `📺 录制 TVer` | Start a task from a single form dialog: channel/station is a drop-down, parameters are input boxes, and the radio-to-MP4 option is a 转换为视频 checkbox (equivalent to `--to-video`, needs a same-name image). The subtitle form also has a 历史字幕 checkbox (equivalent to `--history`, for scanning an already-past window). The TVer form takes 开始时间 and 结束时间, computing the recording duration from the two. Presets first ask for the type, then show the same form |
 | `翻译字幕` | Pick an already timeline-adjusted SRT file (NSOpenPanel); runs `srt_translate.py`, output `<name>中.srt` next to the input; needs the DeepSeek key (see below); menu task only, not a preset |
+| `其他功能` | Submenu: 录制 YouTube 直播 (URL + 可选开始时间/时长/输出文件名); future features slot in as more sub-items |
 | `⭐ 收藏` | Presets: 新建收藏 / 管理收藏, plus clickable preset entries to run them. 修改 re-runs the full creation flow with the current values pre-filled, then overwrites the preset in place |
 | `🕐 最近` | Recent tasks with status; re-run a task or view its command/log |
 | `⏹ 停止全部` | Terminate all running tasks (shown only while tasks are active) |
@@ -259,6 +261,40 @@ export DEEPSEEK_API_KEY="sk-your-key"
 ```
 
 Exit code is 0 on success, even when some blocks fall back to the original text (each fallback logs `[WARN]`). Exit code is 1 on fatal errors: missing API key, missing input file, `-o` equal to the input, or undecodable input bytes.
+
+---
+
+## 8. youtube_recorder.py — YouTube 直播录制
+
+Standalone script that records a YouTube LIVE stream via the yt-dlp engine. Supports scheduled start (`--start-at`), timed auto-stop (`-d`), DVR playback from the live start (`--live-from-start` on by default), and a cookies fallback.
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `url` | str (positional) | YouTube 直播地址 (watch?v= / /live / @channel/live) |
+| `-o, --output` | str | 输出视频路径 (默认: output_时间戳.mp4) |
+| `-d, --duration` | float | 录制时长 (分)，到时自动停止 (缺省: 录到直播结束) |
+| `--start-at` | HH:MM | 延迟到指定时间开始录制 (今日当地时间) |
+| `--no-live-from-start` | flag | 不从直播开头回看, 从当前时间开始录制 (默认: 直播开头回看) |
+| `--cookies` | str | 浏览器导出的 cookies 文件路径 (PO Token/地区兜底) |
+| `--wait-for-video` | float | 等待预约直播开播的秒数 (超时则失败) |
+
+```bash
+# Record immediately for 60 minutes
+.venv/bin/python youtube_recorder.py <URL> -d 60 -o out.mp4
+
+# Schedule a 21:00 recording for 60 minutes
+caffeinate -s .venv/bin/python youtube_recorder.py <URL> --start-at 21:00 -d 60 -o out.mp4
+
+# Use browser-exported cookies as a fallback
+.venv/bin/python youtube_recorder.py <URL> -d 60 --cookies cookies.txt -o out.mp4
+```
+
+Notes:
+- **时区**: `--start-at` uses system local time (Asia/Tokyo), past times roll to tomorrow — same convention as the other scripts.
+- **caffeinate**: prefix long recordings with `caffeinate -s` to prevent Mac sleep.
+- **live-from-start**: DVR 回看默认开启 (`--no-live-from-start` 关闭)，受 YouTube DVR 限制，最长约 120 小时。
+- **PO Token**: HLS 直播无需 PO Token；遇 403/无格式时用 `--cookies`（tv client 免 token）；完整 YouTube 支持需 deno + yt-dlp-ejs（按需）。
+- **ffmpeg**: 用于多流合并，缺失时告警并继续录制（降级）。
 
 ---
 
