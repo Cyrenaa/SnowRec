@@ -1058,10 +1058,16 @@ if CommandLine.arguments.contains("--dump-menu") {
 // be gone (launcher.py:257 active filter) — proving the periodic rebuild,
 // not a one-shot. Prints both dumps labeled, exit 0.
 //
+// Phase C: 其他功能 wiring assert — every rebuild re-runs attachMenuActions
+// (-> attachOtherFeaturesActions), which must enable the YouTube 直播录制
+// sub-item. dumpTree renders disabled items with a " (disabled)" suffix, so
+// the enabled wired item shows exactly "  > YouTube 直播录制". Prints
+// menuWiringAssert=pass/fail, exit 0 on pass, 1 on failure.
+//
 // Top-level code is an async context (SE-0343), where RunLoop.run(until:)
 // is `noasync` — so the test lives in a plain @MainActor sync function.
 @MainActor
-func runMenuRefreshTest() {
+func runMenuRefreshTest() -> Bool {
     let delegate = AppDelegate()
     delegate.startRefreshTimer()
 
@@ -1079,10 +1085,21 @@ func runMenuRefreshTest() {
     let dumpB = MenuBuilder.dumpTree(delegate.currentMenu ?? NSMenu())
     print("--- Phase B (after next 5s tick, task 成功) ---")
     print(dumpB)
+
+    // Phase C: 其他功能 wiring — after the rebuild the YouTube 直播录制
+    // sub-item must be present and ENABLED (no " (disabled)" suffix).
+    let wiredLine = "  > YouTube 直播录制"
+    let disabledLine = "  > YouTube 直播录制 (disabled)"
+    let passed = dumpB.contains(wiredLine) && !dumpB.contains(disabledLine)
+    print("--- Phase C (其他功能 wiring assert) ---")
+    print(passed ? "menuWiringAssert=pass" : "menuWiringAssert=fail")
+    if !passed {
+        print("menuWiringDump=\(dumpB)")
+    }
+    return passed
 }
 if CommandLine.arguments.contains("--menu-refresh-test") {
-    runMenuRefreshTest()
-    exit(0)
+    exit(runMenuRefreshTest() ? 0 : 1)
 }
 
 // --alert-probe-test: present the REAL radio-flow alert on a REAL screen and
