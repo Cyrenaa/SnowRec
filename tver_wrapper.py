@@ -26,17 +26,11 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 FETCH_SCRIPT = SCRIPT_DIR / "tver_fetch_url.py"
 RECORD_SCRIPT = SCRIPT_DIR / "live_recorder_sub.py"
-TRANSLATE_SCRIPT = SCRIPT_DIR / "srt_translate.py"
 PYTHON = sys.executable
 
 
 def timestamp():
     return datetime.now().strftime("%H:%M:%S")
-
-
-def run_translate(srt_path: Path) -> int:
-    result = subprocess.run([PYTHON, str(TRANSLATE_SCRIPT), str(srt_path)])
-    return result.returncode
 
 
 def main():
@@ -65,8 +59,6 @@ def main():
                         help="轮询间隔秒数 (默认: 2.0)")
     parser.add_argument("--fetch-timeout", type=int, default=60,
                         help="获取 m3u8 链接的超时秒数 (默认: 60)")
-    parser.add_argument("--translate", action="store_true",
-                        help="录制结束后调用 srt_translate.py 将字幕翻译为中文（需要 DEEPSEEK_API_KEY）")
     args = parser.parse_args()
 
     if not RECORD_SCRIPT.exists():
@@ -168,22 +160,6 @@ def main():
 
     print("-" * 50)
     print(f"[{timestamp()}] 录制结束 (退出码: {proc.returncode})")
-    if proc.returncode == 0 and args.translate:
-        srt_path = None
-        if args.subtitle:
-            srt_path = Path(args.subtitle)
-        elif args.output:
-            srt_path = Path(args.output).with_suffix(".srt")
-        if srt_path is None:
-            print(f"[{timestamp()}] [WARN] 未指定输出路径，跳过字幕翻译", file=sys.stderr)
-        elif not srt_path.exists():
-            print(f"[{timestamp()}] [WARN] 未找到字幕文件 {srt_path}，跳过翻译", file=sys.stderr)
-        else:
-            print(f"[{timestamp()}] 调用 srt_translate.py 翻译字幕...", file=sys.stderr)
-            rc = run_translate(srt_path)
-            if rc != 0:
-                print(f"[{timestamp()}] [ERR] 字幕翻译失败 (退出码 {rc})", file=sys.stderr)
-                sys.exit(1)
     sys.exit(proc.returncode)
 
 

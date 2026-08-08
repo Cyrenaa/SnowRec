@@ -384,12 +384,6 @@ def convert_to_srt(vtt_path: Path) -> bool:
     return False
 
 
-def run_translate(srt_path: Path) -> int:
-    """Invoke srt_translate.py on the SRT; return its exit code."""
-    result = subprocess.run([sys.executable, str(TRANSLATE_SCRIPT), str(srt_path)])
-    return result.returncode
-
-
 def download_one(template: str, file_id: int, headers: dict) -> str | None:
     url = template.format(file_id)
     return download_raw(url, headers, file_id)
@@ -1509,7 +1503,6 @@ def main_live_window(url: str, start_time: str, end_time: str,
 # ============================================================
 
 FETCH_SCRIPT = Path(__file__).resolve().parent / "tver_fetch_url.py"
-TRANSLATE_SCRIPT = Path(__file__).resolve().parent / "srt_translate.py"
 
 
 # ── playlist 解析 ───────────────────────────────────────────────────────
@@ -1633,11 +1626,7 @@ if __name__ == "__main__":
     parser.add_argument("--history", action="store_true",
                         help="窗口已过时直接回看下载历史字幕（默认顺延到明天同一时段）")
     parser.add_argument("--fetch-timeout", type=int, default=60, help="获取 m3u8 链接的超时秒数 (默认: 60)")
-    parser.add_argument("--translate", action="store_true",
-                        help="SRT 转换后调用 srt_translate.py 翻译为中文（需要 DEEPSEEK_API_KEY）")
     args = parser.parse_args()
-    if args.translate and args.no_srt:
-        parser.error("--translate 需要启用 SRT 转换，不能与 --no-srt 同时使用")
 
     try:
         if args.tver_page:
@@ -1682,18 +1671,9 @@ if __name__ == "__main__":
             )
 
         if not args.no_srt and OUTPUT_FILE.exists():
-            srt_path = OUTPUT_FILE.with_suffix(".srt")
             if convert_to_srt(OUTPUT_FILE):
-                if args.translate and srt_path.exists():
-                    print("[OK] 调用 srt_translate.py 翻译字幕...")
-                    rc = run_translate(srt_path)
-                    if rc != 0:
-                        print(f"[ERR] 字幕翻译失败 (退出码 {rc})", file=sys.stderr)
-                        sys.exit(1)
                 if OUTPUT_FILE.exists():
                     OUTPUT_FILE.unlink()
-            elif args.translate:
-                print("[WARN] SRT 转换失败，跳过翻译")
     finally:
         if not args.keep:
             cleanup()
