@@ -120,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.target = self
                 item.action = #selector(newTverAction)
                 item.isEnabled = true
+            case "翻译字幕":
+                item.target = self
+                item.action = #selector(newTranslateAction)
+                item.isEnabled = true
             case "新建收藏...":
                 item.target = self
                 item.action = #selector(savePresetAction)
@@ -230,6 +234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newTverAction() {
         DialogFlows.newTver(delegate: self)
+    }
+
+    @objc private func newTranslateAction() {
+        DialogFlows.newTranslate(delegate: self)
     }
 
     // MARK: - Preset actions (launcher.py:272-281)

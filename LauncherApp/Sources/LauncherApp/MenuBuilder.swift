@@ -38,7 +38,7 @@ enum MenuBuilder {
         }
 
         // 下载字幕 / 录制广播 / 录制 TVer (launcher.py:266-268).
-        for title in ["下载字幕", "录制广播", "录制 TVer"] {
+        for title in ["下载字幕", "录制广播", "录制 TVer", "翻译字幕"] {
             menu.addItem(disabledItem(title))
         }
         menu.addItem(.separator())
