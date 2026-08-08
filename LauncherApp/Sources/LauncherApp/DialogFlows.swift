@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// The three new-task dialog flows (launcher.py:493-589 parity) plus the
 /// shared confirm-path pipeline reused by the `--flow-test` QA flag.
@@ -34,8 +35,7 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
             outputInitial: "sub_tbs",
-            checkboxLabel: "历史字幕", checkboxDefault: false,
-            secondCheckboxLabel: "翻译为中文", secondCheckboxDefault: false)
+            checkboxLabel: "历史字幕", checkboxDefault: false)
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -46,10 +46,9 @@ enum DialogFlows {
             return  // empty input == cancel (launcher.py: `if not x: return`)
         }
         let history = content.checkbox?.state == .on
-        let translate = content.secondCheckbox?.state == .on
         startSubtitle(delegate: delegate, channel: channel,
                       timeStart: timeStart, timeEnd: timeEnd, output: output,
-                      history: history, translate: translate)
+                      history: history)
     }
 
     /// launcher.py:564-589 `_new_radio`.
@@ -97,8 +96,8 @@ enum DialogFlows {
     }
 
     /// Internal QA hook: builds the REAL subtitle-flow alert — the exact same
-    /// makeTaskAlert construction as newSubtitle (history + translate checkboxes)
-    /// — WITHOUT running the modal, so a probe can verify its construction.
+    /// makeTaskAlert construction as newSubtitle (history checkbox) — WITHOUT
+    /// running the modal, so a probe can verify its construction.
     static func subtitleAlert() -> TaskAlertContent {
         makeTaskAlert(
             title: "下载字幕",
@@ -108,13 +107,12 @@ enum DialogFlows {
             startLabel: "开始时间 (HH:MM):", startDefault: "19:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "20:00",
             outputInitial: "sub_tbs",
-            checkboxLabel: "历史字幕", checkboxDefault: false,
-            secondCheckboxLabel: "翻译为中文", secondCheckboxDefault: false)
+            checkboxLabel: "历史字幕", checkboxDefault: false)
     }
 
     /// Internal QA hook: builds the REAL tver-flow alert — the exact same
-    /// makeTaskAlert construction as newTver (translate checkbox) — WITHOUT
-    /// running the modal, so a probe can verify its construction.
+    /// makeTaskAlert construction as newTver (no checkbox) — WITHOUT running
+    /// the modal, so a probe can verify its construction.
     static func tverAlert() -> TaskAlertContent {
         makeTaskAlert(
             title: "预约 TVer 录制",
@@ -123,8 +121,7 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "22:00",
-            outputInitial: "tbs.mp4",
-            checkboxLabel: "翻译为中文", checkboxDefault: false)
+            outputInitial: "tbs.mp4")
     }
 
     /// launcher.py:493-520 `_new_recording`.
@@ -136,8 +133,7 @@ enum DialogFlows {
             defaultOption: "TBS",
             startLabel: "开始时间 (HH:MM):", startDefault: "21:00",
             secondLabel: "结束时间 (HH:MM):", secondDefault: "22:00",
-            outputInitial: "tbs.mp4",
-            checkboxLabel: "翻译为中文", checkboxDefault: false)
+            outputInitial: "tbs.mp4")
         guard AlertPresenter.presentModal(content.alert) == .alertFirstButtonReturn else { return }
 
         let channel = content.popup.titleOfSelectedItem ?? ""
@@ -148,10 +144,32 @@ enum DialogFlows {
               CommandBuilder.channels[channel] != nil else {
             return  // empty/unknown input == cancel (launcher.py:648 page_url check)
         }
-        let translate = content.checkbox?.state == .on
         startTver(delegate: delegate, channel: channel,
-                  startAt: startAt, endTime: endTime, output: output,
-                  translate: translate)
+                  startAt: startAt, endTime: endTime, output: output)
+    }
+
+    /// Menu item 翻译字幕: NSOpenPanel picks ONE timeline-adjusted SRT, then
+    /// startTranslate spawns srt_translate.py on it. Menu-only task (no preset type).
+    static func newTranslate(delegate: AppDelegate) {
+        let panel = NSOpenPanel()
+        panel.title = "翻译字幕"
+        panel.prompt = "翻译"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "srt")].compactMap { $0 }
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        startTranslate(delegate: delegate, path: url.path)
+    }
+
+    @discardableResult
+    static func startTranslate(delegate: AppDelegate, path: String) -> Task {
+        let cmd = CommandBuilder.translateCommand(
+            repoRoot: RepoRoot.resolveRepoRoot() ?? "", input: path)
+        let base = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        let name = "翻译 \(base)"
+        return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
     }
 
     // MARK: - Post-confirm pipeline (shared with --flow-test)
@@ -162,12 +180,12 @@ enum DialogFlows {
     static func startSubtitle(
         delegate: AppDelegate, channel: String,
         timeStart: String, timeEnd: String, output: String,
-        history: Bool = false, translate: Bool = false
+        history: Bool = false
     ) -> Task {
         let cmd = CommandBuilder.subtitleCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
             channel: channel, timeStart: timeStart, timeEnd: timeEnd, output: output,
-            history: history, translate: translate)
+            history: history)
         let name = "字幕 \(channel) \(timeStart)-\(timeEnd)"
         return startFlow(delegate: delegate, name: name, historyLabel: name, cmd: cmd)
     }
@@ -197,8 +215,7 @@ enum DialogFlows {
     @discardableResult
     static func startTver(
         delegate: AppDelegate, channel: String,
-        startAt: String, endTime: String, output: String,
-        translate: Bool = false
+        startAt: String, endTime: String, output: String
     ) -> Task? {
         guard let duration = LabelHelpers.durationMin(startAt: startAt, endTime: endTime),
               duration > 0 else {
@@ -207,8 +224,7 @@ enum DialogFlows {
         guard AlertPresenter.confirmLongDuration(minutes: duration) else { return nil }
         let cmd = CommandBuilder.tverCommand(
             repoRoot: RepoRoot.resolveRepoRoot() ?? "",
-            channel: channel, startAt: startAt, duration: String(duration), output: output,
-            translate: translate)
+            channel: channel, startAt: startAt, duration: String(duration), output: output)
         let name = "TVer \(channel) \(startAt)-\(endTime)"  // ENTERED endTime (launcher.py:660)
         return startFlow(
             delegate: delegate,
@@ -280,8 +296,7 @@ enum DialogFlows {
         startLabel: String, startDefault: String,
         secondLabel: String, secondDefault: String,
         outputInitial: String,
-        checkboxLabel: String? = nil, checkboxDefault: Bool = false,
-        secondCheckboxLabel: String? = nil, secondCheckboxDefault: Bool = false
+        checkboxLabel: String? = nil, checkboxDefault: Bool = false
     ) -> TaskAlertContent {
         let alert = NSAlert()
         alert.messageText = title
@@ -315,13 +330,6 @@ enum DialogFlows {
             checkbox = box
             rows.append([label(""), box])
         }
-        var secondCheckbox: NSButton?
-        if let secondCheckboxLabel {
-            let box = NSButton(checkboxWithTitle: secondCheckboxLabel, target: nil, action: nil)
-            box.state = secondCheckboxDefault ? .on : .off
-            secondCheckbox = box
-            rows.append([label(""), box])
-        }
 
         let grid = NSGridView(views: rows)
         grid.rowSpacing = 8
@@ -341,8 +349,7 @@ enum DialogFlows {
         return TaskAlertContent(
             alert: alert, popup: popup,
             startField: startField, secondField: secondField,
-            outputField: outputField, checkbox: checkbox,
-            secondCheckbox: secondCheckbox)
+            outputField: outputField, checkbox: checkbox)
     }
 
     /// Grid cell label: right-aligned, non-editable.
@@ -373,9 +380,7 @@ enum DialogFlows {
 
     /// Holds a flow alert's controls. `checkbox` is nil only for the tver
     /// flow (no checkbox row); the radio flow reads `checkbox?.state == .on`
-    /// for 转换为视频, the subtitle flow for 历史字幕. `secondCheckbox` is set
-    /// only for the subtitle flow (翻译为中文); the tver flow reads
-    /// `checkbox?.state == .on` for 翻译为中文.
+    /// for 转换为视频, the subtitle flow for 历史字幕.
     final class TaskAlertContent {
         let alert: NSAlert
         let popup: NSPopUpButton
@@ -383,13 +388,11 @@ enum DialogFlows {
         let secondField: NSTextField
         let outputField: NSTextField
         let checkbox: NSButton?
-        let secondCheckbox: NSButton?
 
         init(
             alert: NSAlert, popup: NSPopUpButton,
             startField: NSTextField, secondField: NSTextField,
-            outputField: NSTextField, checkbox: NSButton?,
-            secondCheckbox: NSButton?
+            outputField: NSTextField, checkbox: NSButton?
         ) {
             self.alert = alert
             self.popup = popup
@@ -397,7 +400,6 @@ enum DialogFlows {
             self.secondField = secondField
             self.outputField = outputField
             self.checkbox = checkbox
-            self.secondCheckbox = secondCheckbox
         }
     }
 }

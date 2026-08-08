@@ -48,13 +48,11 @@ enum PresetFlows {
         case "下载字幕":
             guard !popupValue.isEmpty, !start.isEmpty, !second.isEmpty,
                   !output.isEmpty, !name.isEmpty else { return }
-            let translate = fields.checkbox?.state == .on
             commitPreset(Preset(
                 name: name, action: .subtitle,
                 channel: popupValue, station: nil,
                 timeStart: start, timeEnd: second,
-                startAt: nil, duration: nil, output: output,
-                translate: translate ? true : nil), target: target)
+                startAt: nil, duration: nil, output: output), target: target)
         case "录制广播":
             guard !popupValue.isEmpty, !start.isEmpty, !second.isEmpty,
                   !output.isEmpty, !name.isEmpty else { return }
@@ -71,14 +69,12 @@ enum PresetFlows {
             guard let durationMin = LabelHelpers.durationMin(startAt: start, endTime: second),
                   durationMin > 0 else { return }
             guard AlertPresenter.confirmLongDuration(minutes: durationMin) else { return }
-            let translate = fields.checkbox?.state == .on
             commitPreset(Preset(
                 name: name, action: .tver,
                 channel: popupValue, station: nil,
                 timeStart: nil, timeEnd: nil,
                 startAt: start, duration: String(durationMin), output: output,
-                endTime: second,
-                translate: translate ? true : nil), target: target)
+                endTime: second), target: target)
         }
     }
 
@@ -168,8 +164,7 @@ enum PresetFlows {
             cmd = CommandBuilder.subtitleCommand(
                 repoRoot: root, channel: preset.channel ?? "",
                 timeStart: preset.timeStart ?? "", timeEnd: preset.timeEnd ?? "",
-                output: preset.output ?? "",
-                translate: preset.translate ?? false)
+                output: preset.output ?? "")
         case .radio:
             cmd = CommandBuilder.radioCommand(
                 repoRoot: root, station: preset.station ?? "",
@@ -180,8 +175,7 @@ enum PresetFlows {
             cmd = CommandBuilder.tverCommand(
                 repoRoot: root, channel: preset.channel ?? "",
                 startAt: preset.startAt ?? "", duration: preset.duration ?? "",
-                output: preset.output ?? "",
-                translate: preset.translate ?? false)
+                output: preset.output ?? "")
             // Parity with launcher.py _run_preset + 6a4bd3c: non-numeric,
             // non-finite (nan/inf/-inf — Swift Double("inf") parses like
             // Python float("inf")), or non-positive duration -> silent skip
@@ -365,8 +359,7 @@ enum PresetFlows {
             outputInitial: dv(target?.output, fallback: "sub_\(subChannel.lowercased())"),
             nameInitial: dv(target?.name, fallback: presetNameDefault(action: .subtitle, channel: subChannel, start: subStart)),
             outputFormat: { "sub_\($0.lowercased())" },
-            nameFormat: { ch, start in presetNameDefault(action: .subtitle, channel: ch, start: start) },
-            checkboxLabel: "翻译为中文", checkboxDefault: target?.translate ?? false)
+            nameFormat: { ch, start in presetNameDefault(action: .subtitle, channel: ch, start: start) })
 
         // ── 录制广播 fields ──
         let radioStation = dv(target?.station, fallback: "TBS")
@@ -396,8 +389,7 @@ enum PresetFlows {
             outputInitial: dv(target?.output, fallback: "\(tvChannel.lowercased()).mp4"),
             nameInitial: dv(target?.name, fallback: presetNameDefault(action: .tver, channel: tvChannel, start: tvStart)),
             outputFormat: { "\($0.lowercased()).mp4" },
-            nameFormat: { ch, start in presetNameDefault(action: .tver, channel: ch, start: start) },
-            checkboxLabel: "翻译为中文", checkboxDefault: target?.translate ?? false)
+            nameFormat: { ch, start in presetNameDefault(action: .tver, channel: ch, start: start) })
 
         let fields: [String: PresetTypeFields] = [
             "下载字幕": subFields, "录制广播": radioFields, "录制 TVer": tverFields,

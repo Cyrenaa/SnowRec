@@ -44,8 +44,7 @@ enum CommandBuilder {
         timeStart: String,
         timeEnd: String,
         output: String,
-        history: Bool = false,
-        translate: Bool = false
+        history: Bool = false
     ) -> [String] {
         let pageURL = channels[channel] ?? ""
         var cmd = [
@@ -57,9 +56,6 @@ enum CommandBuilder {
         ]
         if history {
             cmd.append("--history")
-        }
-        if translate {
-            cmd.append("--translate")
         }
         return cmd
     }
@@ -100,8 +96,7 @@ enum CommandBuilder {
         channel: String,
         startAt: String,
         duration: String,
-        output: String,
-        translate: Bool = false
+        output: String
     ) -> [String] {
         let pageURL = channels[channel] ?? ""
         var cmd = [
@@ -111,9 +106,16 @@ enum CommandBuilder {
             "-d", duration,
             "-o", output,
         ]
-        if translate {
-            cmd.append("--translate")
-        }
         return cmd
+    }
+
+    // MARK: translate (menu task — srt_translate.py)
+
+    /// Runs srt_translate.py on an already timeline-adjusted SRT (menu task).
+    /// Input is positional; output defaults to <name>中.srt next to the input.
+    /// DEEPSEEK_API_KEY reaches the child via TaskManager's env injection
+    /// (KeyStore fallback, env wins).
+    static func translateCommand(repoRoot: String, input: String) -> [String] {
+        ["caffeinate", pythonPath(repoRoot: repoRoot), "\(repoRoot)/srt_translate.py", input]
     }
 }

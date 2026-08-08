@@ -22,7 +22,6 @@ struct Preset: Codable, Sendable {
     var output: String?
     var endTime: String?
     var toVideo: Bool?
-    var translate: Bool?
 
     enum CodingKeys: String, CodingKey {
         case name, action, channel, station, duration, output
@@ -31,7 +30,6 @@ struct Preset: Codable, Sendable {
         case startAt = "start_at"
         case endTime = "end_time"
         case toVideo = "to_video"
-        case translate
     }
 }
 
